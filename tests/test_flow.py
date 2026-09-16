@@ -168,3 +168,30 @@ def test_yield_image_handles_bytes_url_and_file(tmp_path):
 
     results = asyncio.run(passthrough(None))
     assert results[0][0] == "text"
+
+
+def test_registration_not_capped_and_auto_size(tmp_path):
+    """默认配置下报名不应被 32 卡住，开赛时按人数自动定规模。"""
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 34):  # 报名 33 人
+            results = await _run(
+                plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名")
+            )
+            assert "报名成功" in results[0][1], results
+
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.player_count == 33
+        assert tournament.size == 0  # 报名阶段规模未定
+
+        results = await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛")
+        )
+        assert "64 强" in results[0][1]
+
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.size == 64
+        assert len(tournament.rounds[0].matches) == 32
+
+    asyncio.run(scenario())

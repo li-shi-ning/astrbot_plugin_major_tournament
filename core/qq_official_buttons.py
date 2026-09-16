@@ -77,10 +77,11 @@ def build_status_markdown(tournament: Tournament) -> str:
     title = tournament.name or "MAJOR 锦标赛"
     lines = [f"🏆 {title}"]
     if tournament.status == STATUS_REGISTRATION:
-        lines.append(
-            f"报名中（{tournament.player_count}/{tournament.size}）"
-            "　点击下方按钮即可参赛"
-        )
+        if tournament.size > 0:
+            progress = f"{tournament.player_count}/{tournament.size}"
+        else:
+            progress = f"{tournament.player_count} 人（规模开赛时自动确定）"
+        lines.append(f"报名中：{progress}　点击下方按钮即可参赛")
     elif tournament.status == STATUS_RUNNING:
         pending = pending_matches(tournament)
         lines.append(f"进行中 · 待判定 {len(pending)} 场")
@@ -95,7 +96,8 @@ def build_status_markdown(tournament: Tournament) -> str:
         lines.append(f"已结束 · 冠军 {tournament.player_name(tournament.champion)}")
     else:
         lines.append(str(tournament.status))
-    lines.append(f"选手 {tournament.player_count} 人 · 规模 {tournament.size} 强")
+    size_text = f"{tournament.size} 强" if tournament.size > 0 else "开赛时自动确定"
+    lines.append(f"选手 {tournament.player_count} 人 · 规模 {size_text}")
     return "\n".join(lines)
 
 

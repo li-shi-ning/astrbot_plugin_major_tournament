@@ -111,7 +111,8 @@ class Tournament:
     group_id: str
     platform_id: str = ""
     name: str = ""
-    size: int = 32
+    #: 赛事规模（2/4/8/16/32/64）。0 表示报名阶段不限人数，开赛时自动确定。
+    size: int = 0
     status: str = STATUS_REGISTRATION
     players: list[Player] = field(default_factory=list)
     rounds: list[Round] = field(default_factory=list)
@@ -155,7 +156,8 @@ class Tournament:
         user_id = str(user_id or "").strip()
         if not user_id or self.find_player_index(user_id) >= 0:
             return False
-        if len(self.players) >= self.size:
+        # size <= 0 表示报名阶段不限制人数，开赛时再自动确定规模
+        if self.size > 0 and len(self.players) >= self.size:
             return False
         self.players.append(
             Player(user_id=user_id, name=str(name or user_id).strip(), seed=0)
@@ -196,7 +198,7 @@ class Tournament:
             group_id=str(data.get("group_id", "")),
             platform_id=str(data.get("platform_id", "")),
             name=str(data.get("name", "")),
-            size=int(data.get("size", 32) or 32),
+            size=int(data.get("size", 0) or 0),
             status=str(data.get("status", STATUS_REGISTRATION)),
             players=[Player.from_dict(p) for p in data.get("players", [])],
             rounds=[Round.from_dict(r) for r in data.get("rounds", [])],

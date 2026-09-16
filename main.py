@@ -21,6 +21,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
 from .core.bracket import (
+    MAX_SIZE,
     VALID_SIZES,
     normalize_size,
     pending_matches,
@@ -130,7 +131,7 @@ class MajorTournament(Star):
         return Tournament(
             group_id=self._group_id(event),
             platform_id=self._platform_id(event),
-            size=int(self.config.get("default_size", 32) or 32),
+            size=int(self.config.get("default_size", 0) or 0),
             name=str(self.config.get("default_name", "") or ""),
         )
 
@@ -148,12 +149,20 @@ class MajorTournament(Star):
     @staticmethod
     def _status_line(tournament: Tournament) -> str:
         if tournament.status == STATUS_REGISTRATION:
-            return f"报名中（{tournament.player_count}/{tournament.size}）"
+            if tournament.size > 0:
+                return f"报名中（{tournament.player_count}/{tournament.size}）"
+            return f"报名中（{tournament.player_count} 人，规模开赛时自动确定）"
         if tournament.status == STATUS_RUNNING:
             return f"进行中 · 待判定 {len(pending_matches(tournament))} 场"
         if tournament.status == STATUS_FINISHED:
             return f"已结束 · 冠军 {tournament.player_name(tournament.champion)}"
         return tournament.status
+
+    @staticmethod
+    def _size_text(tournament: Tournament) -> str:
+        if tournament.size > 0:
+            return f"{tournament.size} 强"
+        return "开赛时自动确定"
 
     def _help_text(self) -> str:
         return (
@@ -164,7 +173,7 @@ class MajorTournament(Star):
             "  major 退赛            取消报名\n"
             "  major 名单            查看报名名单\n"
             "【开赛 / 查看】\n"
-            "  major 开赛 [规模]     开赛，可指定 32/16/8/4/2\n"
+            "  major 开赛 [规模]     开赛；不填规模按报名人数自动确定\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
             "【人工判定】（管理员）\n"
@@ -347,10 +356,14 @@ class MajorTournament(Star):
             return
 
         self._save(tournament)
+        if tournament.size > 0:
+            progress = f"当前 {tournament.player_count}/{tournament.size} 人。"
+        else:
+            progress = f"当前 {tournament.player_count} 人（规模开赛时自动确定）。"
         yield event.plain_result(
             f"✅ 报名成功：{sender_name}\n"
-            f"当前 {tournament.player_count}/{tournament.size} 人。"
-            f"满员或准备就绪后由管理员发送「major 开赛」。"
+            f"{progress}"
+            f"准备就绪后由管理员发送「major 开赛」。"
         )
 
     async def _handle_leave(self, event: AstrMessageEvent):
@@ -366,9 +379,11 @@ class MajorTournament(Star):
             yield event.plain_result("ℹ️ 你还没有报名。")
             return
         self._save(tournament)
-        yield event.plain_result(
-            f"✅ 已退赛。当前 {tournament.player_count}/{tournament.size} 人。"
-        )
+        if tournament.size > 0:
+            progress = f"当前 {tournament.player_count}/{tournament.size} 人。"
+        else:
+            progress = f"当前 {tournament.player_count} 人。"
+        yield event.plain_result(f"✅ 已退赛。{progress}")
 
     async def _handle_players(self, event: AstrMessageEvent):
         tournament = self._load(event)
@@ -380,7 +395,7 @@ class MajorTournament(Star):
             return
         lines = [
             f"🏆 {tournament.name or 'Major 锦标赛'} · {self._status_line(tournament)}",
-            f"规模：{tournament.size} 强",
+            f"规模：{self._size_text(tournament)}",
             "———————————————",
         ]
         for index, player in enumerate(tournament.players, start=1):
@@ -422,10 +437,11 @@ class MajorTournament(Star):
             yield event.plain_result("❌ 没有新增选手（已报名或人数已满）。")
             return
         self._save(tournament)
-        yield event.plain_result(
-            f"✅ 已添加：{'、'.join(added)}。"
-            f"当前 {tournament.player_count}/{tournament.size} 人。"
-        )
+        if tournament.size > 0:
+            progress = f"当前 {tournament.player_count}/{tournament.size} 人。"
+        else:
+            progress = f"当前 {tournament.player_count} 人。"
+        yield event.plain_result(f"✅ 已添加：{'、'.join(added)}。{progress}")
 
     async def _handle_start(self, event: AstrMessageEvent, args: list[str]):
         if not event.is_admin():
@@ -450,12 +466,19 @@ class MajorTournament(Star):
                     "register" if arg.lower() in {"register", "报名"} else "random"
                 )
 
-        normalized = normalize_size(size, tournament.player_count)
-        if normalized not in VALID_SIZES:
-            yield event.plain_result("❌ 规模只能是 2/4/8/16/32。")
-            return
         if tournament.player_count < 2:
             yield event.plain_result("❌ 至少需要 2 名选手才能开赛。")
+            return
+
+        normalized = normalize_size(size, tournament.player_count)
+        if normalized > MAX_SIZE:
+            yield event.plain_result(
+                f"❌ 报名 {tournament.player_count} 人，超过单败淘汰赛上限 "
+                f"{MAX_SIZE} 人；请分批开赛。"
+            )
+            return
+        if normalized not in VALID_SIZES:
+            yield event.plain_result("❌ 规模只能是 2/4/8/16/32/64。")
             return
 
         start_tournament(tournament, size=normalized, seed_mode=seed_mode)

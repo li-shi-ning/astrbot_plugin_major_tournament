@@ -24,7 +24,10 @@ from .models import (
 )
 
 #: 允许的赛事规模（强数）
-VALID_SIZES: tuple[int, ...] = (2, 4, 8, 16, 32)
+VALID_SIZES: tuple[int, ...] = (2, 4, 8, 16, 32, 64)
+
+#: 自动排赛允许的最大规模，避免对阵图过大
+MAX_SIZE: int = 64
 
 #: 各轮次中文名
 ROUND_NAMES: dict[int, str] = {
@@ -33,6 +36,7 @@ ROUND_NAMES: dict[int, str] = {
     8: "8强",
     16: "16强",
     32: "32强",
+    64: "64强",
 }
 
 
@@ -47,14 +51,17 @@ def next_power_of_two(count: int) -> int:
 def normalize_size(size: int | None, player_count: int) -> int:
     """把用户传入的规模规整为合法的 2 的幂。
 
-    - 非法/未提供时，自动取“不小于报名人数的最小 2 的幂”。
+    - 未提供、<=0 或非法时，自动取“不小于报名人数的最小 2 的幂”。
     - 若指定规模小于报名人数，则放大到能容纳所有报名者的规模。
     """
-    if size is None:
-        return next_power_of_two(max(2, player_count))
-    if size in VALID_SIZES:
-        return max(size, next_power_of_two(max(2, player_count)))
-    return next_power_of_two(max(2, player_count))
+    auto_size = next_power_of_two(max(2, player_count))
+    try:
+        requested = int(size) if size is not None else 0
+    except (TypeError, ValueError):
+        requested = 0
+    if requested in VALID_SIZES:
+        return max(requested, auto_size)
+    return auto_size
 
 
 def seed_order(size: int) -> list[int]:
@@ -140,21 +147,58 @@ def _advance(tournament: Tournament, match: Match, winner_id: str) -> None:
 
 
 def _auto_advance_byes(tournament: Tournament) -> None:
-    """自动让轮空选手晋级，直到没有新的轮空。"""
-    while True:
-        advanced = False
-        for round_ in tournament.rounds:
+    """自动让轮空（bye）选手晋级。
+
+    关键点：只有「对手位置永久为空」才算轮空。
+    首轮空位天然是轮空；后续轮次的空位若来自一场「无人的比赛」（void），
+    也视为轮空；否则只是「等待上游胜者」，绝不能提前判胜。
+    """
+    rounds = tournament.rounds
+    if not rounds:
+        return
+
+    void: dict[str, bool] = {}
+
+    def _feeder(match: Match, is_p1: bool) -> Match | None:
+        if match.round_index == 0:
+            return None
+        prev_round = rounds[match.round_index - 1]
+        return prev_round.matches[match.index * 2 + (0 if is_p1 else 1)]
+
+    def _slot_is_void(match: Match, is_p1: bool) -> bool:
+        if match.p1 if is_p1 else match.p2:  # 该位置已有人
+            return False
+        if match.round_index == 0:
+            return True  # 首轮空位就是轮空
+        feeder = _feeder(match, is_p1)
+        return bool(feeder and void.get(feeder.match_id, False))
+
+    changed = True
+    while changed:
+        changed = False
+        for round_ in rounds:
             for match in round_.matches:
                 if match.status == MATCH_FINISHED:
                     continue
-                if bool(match.p1) ^ bool(match.p2):  # 恰好一人
-                    winner_id = match.p1 or match.p2
-                    match.winner = winner_id
+                p1_void = _slot_is_void(match, True)
+                p2_void = _slot_is_void(match, False)
+
+                if not match.p1 and not match.p2:
+                    if p1_void and p2_void:
+                        void[match.match_id] = True  # 整场无人，标记为虚空
+                    continue
+
+                # 恰好一人，且另一侧永久为空 -> 轮空晋级
+                if match.p1 and not match.p2 and p2_void:
+                    match.winner = match.p1
                     match.status = MATCH_FINISHED
-                    _advance(tournament, match, winner_id)  # type: ignore[arg-type]
-                    advanced = True
-        if not advanced:
-            break
+                    _advance(tournament, match, match.p1)
+                    changed = True
+                elif match.p2 and not match.p1 and p1_void:
+                    match.winner = match.p2
+                    match.status = MATCH_FINISHED
+                    _advance(tournament, match, match.p2)
+                    changed = True
 
 
 def start_tournament(

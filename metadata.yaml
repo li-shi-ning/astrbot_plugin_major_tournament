@@ -1,7 +1,7 @@
 name: astrbot_plugin_major_tournament
 display_name: Major 赛制管理器
 desc: 群内 Major 赛制锦标赛：按钮报名、管理员人工判胜、32/16/8/4/2 强自动排赛，并渲染 Major 风格对阵图
-version: v0.2.0
+version: v0.2.1
 author: li-shi-ning
 repo: https://github.com/li-shi-ning/astrbot_plugin_major_tournament
 astrbot_version: ">=4.0.0"

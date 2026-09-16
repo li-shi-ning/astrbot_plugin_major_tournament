@@ -37,6 +37,10 @@ def test_next_power_of_two_and_normalize():
     assert bk.normalize_size(4, 9) == 16
     # 非法规模自动推导
     assert bk.normalize_size(7, 6) == 8
+    # 0 / None 表示自动
+    assert bk.normalize_size(0, 3) == 4
+    assert bk.normalize_size(None, 33) == 64
+    assert bk.normalize_size(0, 40) == 64
 
 
 def test_start_creates_all_rounds():
@@ -117,3 +121,50 @@ def test_resolve_winner_by_name():
     ok, msg = bk.set_winner(t, "R4-1", "P4")
     assert ok
     assert t.rounds[0].matches[0].winner == "u4"
+
+
+def test_registration_is_unlimited_when_size_is_auto():
+    """size=0 时报名阶段不限制人数。"""
+    t = Tournament(group_id="g1", size=0)
+    for i in range(50):
+        assert t.add_player(f"u{i + 1}", f"P{i + 1}") is True
+    assert t.player_count == 50
+
+    # 指定固定规模时，报名到该人数即满
+    limited = Tournament(group_id="g1", size=4)
+    for i in range(4):
+        assert limited.add_player(f"u{i + 1}", f"P{i + 1}") is True
+    assert limited.add_player("u5", "P5") is False
+
+
+def test_start_auto_picks_bracket_size_for_many_players():
+    t = Tournament(group_id="g1", size=0)
+    for i in range(33):
+        t.add_player(f"u{i + 1}", f"P{i + 1}")
+    bk.start_tournament(t, size=None, seed_mode="register")
+    assert t.size == 64
+    assert len(t.rounds[0].matches) == 32
+
+
+def test_byes_do_not_crown_champion_early():
+    """5 人打 8 强：轮空选手应等待，而不是直接夺冠。"""
+    t = make_tournament(5, size=8)
+    bk.start_tournament(t, size=8, seed_mode="register")
+
+    assert t.champion is None
+    assert t.status != STATUS_FINISHED
+    assert len(bk.pending_matches(t)) >= 1
+    # 8 强里应有一场真实对局；4 强里 u1/u2/u3 之一在等待上游结果
+    first_round_states = {m.status for m in t.rounds[0].matches}
+    assert MATCH_READY in first_round_states
+
+
+def test_oversized_bracket_does_not_finish_immediately():
+    """5 人强制打 32 强：多轮轮空也不能提前产生冠军。"""
+    t = make_tournament(5, size=32)
+    bk.start_tournament(t, size=32, seed_mode="register")
+
+    assert t.champion is None
+    assert t.status != STATUS_FINISHED
+    # 至少还有一场真实对局待打
+    assert len(bk.pending_matches(t)) >= 1
