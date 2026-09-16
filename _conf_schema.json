@@ -1,0 +1,27 @@
+{
+  "basic": {
+    "description": "Major 赛制基础设置",
+    "type": "object",
+    "hint": "报名、开赛与对阵图渲染相关配置。",
+    "items": {
+      "default_size": {
+        "description": "默认赛事规模（强）",
+        "type": "int",
+        "default": 32,
+        "hint": "可选 2/4/8/16/32。实际开赛时会自动取能容纳报名人数的最小规模。"
+      },
+      "default_name": {
+        "description": "默认赛事名称",
+        "type": "string",
+        "default": "",
+        "hint": "留空则显示为 MAJOR 锦标赛。"
+      },
+      "auto_render": {
+        "description": "每次判胜后自动渲染对阵图",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后管理员每判定一场胜负都会自动生成一张对阵图，T2I 渲染有开销，请按需开启。"
+      }
+    }
+  }
+}

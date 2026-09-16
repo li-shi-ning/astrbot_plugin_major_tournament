@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ 360 + (rounds | length) * 300 }}, initial-scale=1.0">
+<title>{{ name }} · 对阵图</title>
+<style>
+  :root {
+    --bg: #070b16;
+    --bg-glow: #16233f;
+    --panel: #101829;
+    --panel-2: #0c1322;
+    --line: #22304d;
+    --line-soft: #1a2540;
+    --gold: #f2c14e;
+    --gold-soft: #7a6224;
+    --text: #e9eefb;
+    --muted: #8494b8;
+    --win: #46e0a4;
+    --ready: #4ea3ff;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Noto Sans SC', 'Noto Sans TC', 'PingFang SC', 'Microsoft YaHei',
+                 -apple-system, BlinkMacSystemFont, sans-serif;
+    background:
+      radial-gradient(1100px 520px at 50% -12%, var(--bg-glow) 0%, transparent 62%),
+      radial-gradient(800px 400px at 100% 110%, #101c33 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    padding: 34px 38px 26px;
+    min-height: 100vh;
+  }
+  .stage {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(18, 27, 46, 0.94), rgba(8, 12, 22, 0.94));
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(242, 193, 78, 0.06);
+    padding: 26px 30px 22px;
+  }
+
+  /* ── Header ── */
+  .header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .trophy {
+    width: 54px; height: 54px; border-radius: 14px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #1a1405;
+    background: linear-gradient(145deg, #ffe08a, #e2a92f);
+    box-shadow: 0 6px 20px rgba(242, 193, 78, 0.28);
+  }
+  .titles h1 { font-size: 30px; letter-spacing: 2px; font-weight: 800; }
+  .titles .sub { margin-top: 5px; color: var(--muted); font-size: 14px; letter-spacing: 1px; }
+  .meta { text-align: right; }
+  .pill {
+    display: inline-block; padding: 7px 16px; border-radius: 999px;
+    border: 1px solid var(--gold-soft); color: var(--gold);
+    background: rgba(242, 193, 78, 0.08); font-size: 15px; font-weight: 700;
+  }
+  .meta .hint { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
+
+  .divider {
+    height: 1px; margin: 22px 0 8px;
+    background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+    opacity: 0.55;
+  }
+
+  /* ── Bracket ── */
+  .bracket {
+    display: flex; gap: 22px; align-items: stretch;
+    width: {{ 320 + (rounds | length) * 300 }}px;
+    height: {{ [1180, (rounds[0].matches | length) * 92] | max }}px;
+  }
+  .round { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
+  .round-title {
+    text-align: center; font-size: 15px; font-weight: 800; letter-spacing: 3px;
+    color: var(--gold); padding: 8px 0 12px; text-transform: uppercase;
+  }
+  .round-body { flex: 1; display: flex; flex-direction: column; }
+  .slot { flex: 1; display: flex; align-items: center; }
+
+  .match {
+    position: relative; width: 100%;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    overflow: hidden;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
+  }
+  .match.ready { border-color: rgba(78, 163, 255, 0.55); box-shadow: 0 0 0 1px rgba(78,163,255,.18), 0 8px 22px rgba(78,163,255,.12); }
+  .match.finished { border-color: rgba(70, 224, 164, 0.28); }
+
+  .side {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; font-size: 15px; line-height: 1.2;
+  }
+  .side + .side { border-top: 1px dashed var(--line-soft); }
+  .side.empty { color: #5d6b8c; font-style: italic; }
+  .side.win { background: linear-gradient(90deg, rgba(70, 224, 164, 0.14), transparent 78%); }
+  .side.win .pname { color: var(--win); font-weight: 800; }
+  .side.win .tag { color: var(--win); border-color: rgba(70,224,164,.45); }
+
+  .tag {
+    flex: 0 0 auto; min-width: 22px; height: 22px; padding: 0 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 11.5px; color: var(--muted); font-weight: 700;
+  }
+  .pname { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pscore {
+    flex: 0 0 auto; min-width: 20px; text-align: right;
+    font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums;
+  }
+  .mid {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-size: 9.5px; letter-spacing: 0.6px; color: #48577a;
+    writing-mode: vertical-rl; text-orientation: mixed;
+  }
+  .match.ready .mid { color: var(--ready); }
+
+  /* ── Champion ── */
+  .champion-box {
+    width: 100%; border: 1px solid var(--gold-soft); border-radius: 14px;
+    background: linear-gradient(180deg, rgba(242,193,78,.16), rgba(242,193,78,.04));
+    padding: 20px 16px; text-align: center;
+  }
+  .champion-box .crown { font-size: 30px; }
+  .champion-box .who { margin-top: 8px; font-size: 20px; font-weight: 900; color: var(--gold); }
+  .champion-box .seed { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .champion-box.pending { border-style: dashed; border-color: var(--line); background: rgba(16,24,41,.6); }
+  .champion-box.pending .who { color: var(--muted); font-size: 15px; font-weight: 600; }
+
+  .footer {
+    margin-top: 18px; display: flex; justify-content: space-between;
+    color: var(--muted); font-size: 11.5px; letter-spacing: 0.6px;
+  }
+  .footer .accent { color: var(--gold); }
+</style>
+</head>
+<body>
+<div class="stage">
+  <header class="header">
+    <div class="brand">
+      <div class="trophy">🏆</div>
+      <div class="titles">
+        <h1>{{ name }}</h1>
+        <div class="sub">MAJOR CHAMPIONSHIP · {{ size }}强单败淘汰制</div>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="pill">{{ status_text }}</div>
+      {% if next_hint %}<div class="hint">下一场待判定：{{ next_hint }}</div>{% endif %}
+    </div>
+  </header>
+
+  <div class="divider"></div>
+
+  <div class="bracket">
+    {% for round in rounds %}
+    <div class="round">
+      <div class="round-title">{{ round.name }}</div>
+      <div class="round-body">
+        {% for m in round.matches %}
+        <div class="slot">
+          <div class="match {{ 'finished' if m.finished else ('ready' if m.ready else '') }}">
+            <div class="side {{ 'win' if m.p1.winner else '' }} {{ 'empty' if m.p1.empty else '' }}">
+              <span class="tag">{{ m.p1.seed if m.p1.seed else '·' }}</span>
+              <span class="pname">{{ m.p1.name }}</span>
+              <span class="pscore">{{ m.score1 }}</span>
+            </div>
+            <div class="side {{ 'win' if m.p2.winner else '' }} {{ 'empty' if m.p2.empty else '' }}">
+              <span class="tag">{{ m.p2.seed if m.p2.seed else '·' }}</span>
+              <span class="pname">{{ m.p2.name }}</span>
+              <span class="pscore">{{ m.score2 }}</span>
+            </div>
+            <span class="mid">{{ m.id }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div class="round" style="flex: 0 0 200px;">
+      <div class="round-title">冠军</div>
+      <div class="round-body">
+        <div class="slot">
+          {% if champion %}
+          <div class="champion-box">
+            <div class="crown">👑</div>
+            <div class="who">{{ champion.name }}</div>
+            {% if champion.seed %}<div class="seed">种子 #{{ champion.seed }}</div>{% endif %}
+          </div>
+          {% else %}
+          <div class="champion-box pending">
+            <div class="crown">❔</div>
+            <div class="who">虚位以待</div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>AstrBot · <span class="accent">Major Tournament</span></span>
+    <span>选手 {{ player_count }} 人 · 更新于 {{ updated_at }}</span>
+  </div>
+</div>
+</body>
+</html>
