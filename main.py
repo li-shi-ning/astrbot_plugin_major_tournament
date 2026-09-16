@@ -82,6 +82,15 @@ def _normalize_action(raw: str) -> str:
     return ACTION_ALIASES.get(text, text)
 
 
+def _looks_like_image(blob: bytes) -> bool:
+    """通过文件头判断是否为常见图片格式。"""
+    if not blob:
+        return False
+    return blob.startswith((b"\xff\xd8", b"\x89PNG\r\n\x1a\n", b"GIF8")) or (
+        blob.startswith(b"RIFF") and b"WEBP" in blob[:16]
+    )
+
+
 class MajorTournament(Star):
     """Major 赛制插件主类。"""
 
@@ -411,6 +420,11 @@ class MajorTournament(Star):
         - 本地路径：读取文件后 base64（避免 OneBot / 官方机器人访问不到内部路径）。
         """
         if isinstance(result, bytes):
+            if not _looks_like_image(result):
+                yield event.plain_result(
+                    "❌ 对阵图渲染结果不是有效图片，请检查 T2I 服务。"
+                )
+                return
             yield event.make_result().base64_image(
                 base64.b64encode(result).decode("utf-8")
             )
@@ -424,14 +438,19 @@ class MajorTournament(Star):
             try:
                 with open(result, "rb") as handle:
                     blob = handle.read()
-                yield event.make_result().base64_image(
-                    base64.b64encode(blob).decode("utf-8")
-                )
-                return
             except OSError:
                 # 读取失败时退回让平台自行处理该路径
                 yield event.image_result(result)
                 return
+            if not _looks_like_image(blob):
+                yield event.plain_result(
+                    "❌ 对阵图渲染结果不是有效图片，请检查 T2I 服务。"
+                )
+                return
+            yield event.make_result().base64_image(
+                base64.b64encode(blob).decode("utf-8")
+            )
+            return
 
         yield event.plain_result("❌ 对阵图渲染失败，请稍后重试。")
 
