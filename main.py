@@ -620,6 +620,15 @@ class MajorTournament(Star):
         except (TypeError, ValueError):
             return text[:16]
 
+    def _record_display_name(self, row: dict[str, Any]) -> str:
+        """赛事显示名；老数据没有名字时用创建日期兜底。"""
+        name = str(row.get("name") or "").strip()
+        if name:
+            return name
+        created = self._format_time(str(row.get("created_at") or ""))
+        date_part = created[5:10].replace("-", "") if len(created) >= 10 else ""
+        return f"未命名{date_part}" if date_part else "未命名赛事"
+
     @staticmethod
     def _record_status_text(status: str) -> str:
         return {
@@ -652,10 +661,7 @@ class MajorTournament(Star):
         )
         entries: list[dict[str, Any]] = []
         lines = [f"📜 比赛记录（第 {page}/{total_pages} 页 · 共 {total} 场）"]
-        names = [
-            (row["name"] or f"未命名比赛{offset + index + 1}")
-            for index, row in enumerate(rows)
-        ]
+        names = [self._record_display_name(row) for row in rows]
         for index, row in enumerate(rows):
             number = offset + index + 1
             name = names[index]

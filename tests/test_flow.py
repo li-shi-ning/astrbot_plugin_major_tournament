@@ -403,3 +403,14 @@ def test_room_size_is_used_at_start(tmp_path):
         assert tournament.size == 16
 
     asyncio.run(scenario())
+
+
+def test_record_display_name_fallback(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    assert (
+        plugin._record_display_name(
+            {"name": "", "created_at": "2026-09-16T14:10:00+08:00"}
+        )
+        == "未命名0916"
+    )
+    assert plugin._record_display_name({"name": "群友杯", "created_at": ""}) == "群友杯"
