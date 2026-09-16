@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 pytest.importorskip("astrbot", reason="需要 AstrBot 运行环境")
 
 from astrbot_plugin_major_tournament.core.bracket import pending_matches  # noqa: E402
-from astrbot_plugin_major_tournament.core.store import TournamentStore  # noqa: E402
+from astrbot_plugin_major_tournament.core.database import (  # noqa: E402
+    TournamentDatabase,
+)
 from astrbot_plugin_major_tournament.main import MajorTournament  # noqa: E402
 
 
@@ -70,7 +72,7 @@ async def _run(plugin, event):
 
 def _make_plugin(tmp_path):
     plugin = MajorTournament(None, {})
-    plugin.store = TournamentStore(tmp_path)
+    plugin.store = TournamentDatabase(tmp_path / "test.db")
     return plugin
 
 
@@ -193,5 +195,72 @@ def test_registration_not_capped_and_auto_size(tmp_path):
         tournament = plugin.store.load("g1", "testplat")
         assert tournament.size == 64
         assert len(tournament.rounds[0].matches) == 32
+
+    asyncio.run(scenario())
+
+
+def test_rename_requires_admin_and_persists(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        results = await _run(
+            plugin,
+            FakeEvent("u1", "选手1", admin=False, text="major 命名 我的杯"),
+        )
+        assert "管理员" in results[0][1]
+
+        results = await _run(
+            plugin,
+            FakeEvent("admin", "管理员", admin=True, text="major 命名 群友 MAJOR 杯"),
+        )
+        assert "群友 MAJOR 杯" in results[0][1]
+        assert plugin.store.load("g1", "testplat").name == "群友 MAJOR 杯"
+
+    asyncio.run(scenario())
+
+
+def test_history_command_reads_database(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 5):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛 4")
+        )
+        tournament = plugin.store.load("g1", "testplat")
+        match = pending_matches(tournament)[0]
+        await _run(
+            plugin,
+            FakeEvent(
+                "admin",
+                "管理员",
+                admin=True,
+                text=f"major 胜 {match.match_id} 1 2:1",
+            ),
+        )
+
+        results = await _run(plugin, FakeEvent("u1", "选手1", text="major 记录"))
+        text = results[0][1]
+        assert "比赛记录" in text
+        assert match.match_id in text
+        assert "2:1" in text
+
+    asyncio.run(scenario())
+
+
+def test_open_with_custom_name(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 5):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(
+            plugin,
+            FakeEvent("admin", "管理员", admin=True, text="major 开赛 4 我的杯"),
+        )
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.name == "我的杯"
+        assert tournament.size == 4
 
     asyncio.run(scenario())

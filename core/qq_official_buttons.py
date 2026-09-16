@@ -144,6 +144,7 @@ def build_panel_keyboard(
     bracket_btn = build_command_button("major_bracket", "📋 赛程", "major 对阵")
     image_btn = build_command_button("major_image", "🖼 对阵图", "major 图")
     help_btn = build_command_button("major_help", "❓ 帮助", "major 帮助")
+    history_btn = build_command_button("major_history", "📜 记录", "major 记录")
     reset_btn = build_command_button(
         "major_reset", "🗑 重置", "major 重置", visited_label="已重置"
     )
@@ -153,7 +154,7 @@ def build_panel_keyboard(
 
     if registration_open:
         rows.append({"buttons": [signup, leave, players]})
-        rows.append({"buttons": [bracket_btn, image_btn, help_btn]})
+        rows.append({"buttons": [bracket_btn, image_btn, history_btn, help_btn]})
         if is_admin:
             rows.append({"buttons": [start_btn, reset_btn]})
     else:
@@ -163,9 +164,9 @@ def build_panel_keyboard(
                 pending_matches(tournament)[:max_winner_rows]
             ):
                 rows.append({"buttons": _winner_buttons(tournament, match, offset)})
-            rows.append({"buttons": [reset_btn, help_btn]})
+            rows.append({"buttons": [reset_btn, history_btn, help_btn]})
         else:
-            rows.append({"buttons": [help_btn]})
+            rows.append({"buttons": [history_btn, help_btn]})
 
     return {"content": {"rows": rows[:MAX_ROWS]}}
 

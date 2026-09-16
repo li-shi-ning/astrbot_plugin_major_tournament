@@ -28,6 +28,7 @@ from .core.bracket import (
     set_winner,
     start_tournament,
 )
+from .core.database import TournamentDatabase
 from .core.models import (
     STATUS_FINISHED,
     STATUS_REGISTRATION,
@@ -41,7 +42,6 @@ from .core.qq_official_buttons import (
     is_qq_official_platform,
 )
 from .core.renderer import BracketRenderer
-from .core.store import TournamentStore
 
 PLUGIN_NAME = "astrbot_plugin_major_tournament"
 
@@ -82,6 +82,15 @@ ACTION_ALIASES = {
     "重置": "重置",
     "reset": "重置",
     "删除": "重置",
+    "命名": "命名",
+    "改名": "命名",
+    "名称": "命名",
+    "name": "命名",
+    "rename": "命名",
+    "记录": "记录",
+    "战绩": "记录",
+    "历史": "记录",
+    "history": "记录",
 }
 
 
@@ -106,7 +115,7 @@ class MajorTournament(Star):
         super().__init__(context)
         self.config = config
         self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
-        self.store = TournamentStore(self.data_dir / "tournaments")
+        self.store = TournamentDatabase(self.data_dir / "major.db")
         self.renderer = BracketRenderer(Path(__file__).parent / "templates")
 
     # ────────────────────────── 工具方法 ──────────────────────────
@@ -173,7 +182,9 @@ class MajorTournament(Star):
             "  major 退赛            取消报名\n"
             "  major 名单            查看报名名单\n"
             "【开赛 / 查看】\n"
-            "  major 开赛 [规模]     开赛；不填规模按报名人数自动确定\n"
+            "  major 开赛 [规模] [名称] 开赛；不填规模按人数自动确定\n"
+            "  major 命名 <名称>     修改比赛名称（管理员）\n"
+            "  major 记录 [数量]     查询最近的比赛结果记录\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
             "【人工判定】（管理员）\n"
@@ -235,6 +246,12 @@ class MajorTournament(Star):
         elif action == "胜":
             async for item in self._handle_winner(event, args):
                 yield item
+        elif action == "命名":
+            async for item in self._handle_rename(event, args):
+                yield item
+        elif action == "记录":
+            async for item in self._handle_history(event, args):
+                yield item
         elif action == "重置":
             async for item in self._handle_reset(event):
                 yield item
@@ -245,7 +262,7 @@ class MajorTournament(Star):
             return
 
         # 报名/退赛/开赛/重置/判胜后自动刷新按钮面板
-        if action in {"报名", "退赛", "开赛", "重置", "胜"}:
+        if action in {"报名", "退赛", "开赛", "重置", "胜", "命名"}:
             await self._maybe_send_button_panel(event)
 
     @filter.command("major面板", alias={"major按钮", "major菜单", "major_menu"})
@@ -402,6 +419,50 @@ class MajorTournament(Star):
             lines.append(f"{index}. {player.name}")
         yield event.plain_result("\n".join(lines))
 
+    async def _handle_rename(self, event: AstrMessageEvent, args: list[str]):
+        if not event.is_admin():
+            yield event.plain_result("❌ 只有管理员可以修改比赛名称。")
+            return
+        name = " ".join(args).strip()
+        if not name:
+            yield event.plain_result(
+                "用法：major 命名 <比赛名称>\n例：major 命名 群友 MAJOR 杯"
+            )
+            return
+        tournament = self._load(event)
+        if tournament is None:
+            tournament = self._new(event)
+        tournament.name = name[:30]
+        self._save(tournament)
+        yield event.plain_result(f"✅ 比赛名称已设置为「{tournament.name}」。")
+
+    async def _handle_history(self, event: AstrMessageEvent, args: list[str]):
+        """从数据库查询最近的比赛结果。"""
+        limit = 10
+        for arg in args:
+            if arg.isdigit():
+                limit = min(50, max(1, int(arg)))
+                break
+
+        rows = self.store.recent_history(
+            self._group_id(event), self._platform_id(event), limit
+        )
+        if not rows:
+            yield event.plain_result("ℹ️ 暂无比赛记录。")
+            return
+
+        lines = [f"📜 最近 {len(rows)} 场比赛记录："]
+        for row in rows:
+            score = ""
+            if row.get("score1") is not None or row.get("score2") is not None:
+                score = f"（{row.get('score1') or 0}:{row.get('score2') or 0}）"
+            lines.append(
+                f"  [{row.get('round_name')}] {row.get('match_id')} "
+                f"{row.get('winner_name')} 胜 {row.get('loser_name')}{score}"
+            )
+        lines.append("完整赛程与结果保存在插件数据库 major.db。")
+        yield event.plain_result("\n".join(lines))
+
     async def _handle_add(self, event: AstrMessageEvent, args: list[str]):
         if not event.is_admin():
             yield event.plain_result("❌ 只有管理员可以使用「major 添加」。")
@@ -458,6 +519,7 @@ class MajorTournament(Star):
 
         size = None
         seed_mode = "random"
+        name_parts: list[str] = []
         for arg in args:
             if arg.isdigit():
                 size = int(arg)
@@ -465,6 +527,10 @@ class MajorTournament(Star):
                 seed_mode = (
                     "register" if arg.lower() in {"register", "报名"} else "random"
                 )
+            else:
+                name_parts.append(arg)
+        if name_parts:
+            tournament.name = " ".join(name_parts)[:30]
 
         if tournament.player_count < 2:
             yield event.plain_result("❌ 至少需要 2 名选手才能开赛。")

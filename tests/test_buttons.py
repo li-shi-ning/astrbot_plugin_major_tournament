@@ -184,11 +184,11 @@ class FakeQQEvent:
 
 
 def _make_plugin(tmp_path):
-    from astrbot_plugin_major_tournament.core.store import TournamentStore
+    from astrbot_plugin_major_tournament.core.database import TournamentDatabase
     from astrbot_plugin_major_tournament.main import MajorTournament
 
     plugin = MajorTournament(None, {})
-    plugin.store = TournamentStore(tmp_path)
+    plugin.store = TournamentDatabase(tmp_path / "test.db")
     return plugin
 
 

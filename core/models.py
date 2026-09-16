@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +14,11 @@ from typing import Any
 def now_iso() -> str:
     """返回当前本地时间的 ISO 字符串（精确到秒）。"""
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def new_tournament_id() -> str:
+    """生成一个短且唯一的赛事 ID（用于数据库主键 / 历史归档）。"""
+    return uuid.uuid4().hex[:12]
 
 
 #: 赛事状态
@@ -120,6 +126,8 @@ class Tournament:
     message_id: str = ""
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
+    #: 唯一赛事 ID，用于数据库记录与历史归档
+    tournament_id: str = field(default_factory=new_tournament_id)
 
     # ────────── 查询 ──────────
     def get_player(self, user_id: str | None) -> Player | None:
@@ -190,6 +198,7 @@ class Tournament:
             "message_id": self.message_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "tournament_id": self.tournament_id,
         }
 
     @classmethod
@@ -206,4 +215,5 @@ class Tournament:
             message_id=str(data.get("message_id", "")),
             created_at=str(data.get("created_at", now_iso())),
             updated_at=str(data.get("updated_at", now_iso())),
+            tournament_id=str(data.get("tournament_id") or new_tournament_id()),
         )
