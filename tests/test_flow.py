@@ -76,6 +76,11 @@ def _make_plugin(tmp_path):
     return plugin
 
 
+async def _create_room(plugin, uid="admin", name="管理员", admin=True, args=""):
+    text = "major 创建房间" + (f" {args}" if args else "")
+    return await _run(plugin, FakeEvent(uid, name, admin=admin, text=text))
+
+
 def test_command_parser_strips_prefix():
     plugin = _make_plugin(Path("/tmp"))
     assert plugin._raw_args(FakeEvent(text="major 胜 R8-1 1")) == "胜 R8-1 1"
@@ -87,6 +92,7 @@ def test_full_tournament_flow(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="admin", name="管理员", admin=True)
         # 1. 报名 8 人
         for i in range(1, 9):
             results = await _run(
@@ -136,6 +142,7 @@ def test_non_host_cannot_judge(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="admin", name="管理员", admin=True)
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         await _run(
@@ -178,6 +185,7 @@ def test_registration_not_capped_and_auto_size(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="admin", name="管理员", admin=True)
         for i in range(1, 34):  # 报名 33 人
             results = await _run(
                 plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名")
@@ -204,6 +212,7 @@ def test_rename_permission_and_persist(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="u1", name="选手1", admin=False)
         # u1 报名成房主
         await _run(plugin, FakeEvent("u1", "选手1", text="major 报名"))
         # u2 非房主非管理员 -> 不能改名
@@ -227,6 +236,7 @@ def test_history_command_reads_database(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="admin", name="管理员", admin=True)
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         await _run(
@@ -257,12 +267,12 @@ def test_open_with_custom_name(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(
+            plugin, uid="admin", name="管理员", admin=True, args="我的杯 4"
+        )
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
-        await _run(
-            plugin,
-            FakeEvent("admin", "管理员", admin=True, text="major 开赛 4 我的杯"),
-        )
+        await _run(plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛"))
         tournament = plugin.store.load("g1", "testplat")
         assert tournament.name == "我的杯"
         assert tournament.size == 4
@@ -274,6 +284,7 @@ def test_start_announces_draw_and_list_shows_seeds(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="admin", name="管理员", admin=True)
         for i in range(1, 9):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
 
@@ -292,6 +303,7 @@ def test_redraw_command(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="u1", name="选手1", admin=False)
         for i in range(1, 9):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         await _run(
@@ -316,6 +328,7 @@ def test_host_without_admin_can_start(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
+        await _create_room(plugin, uid="u1", name="选手1", admin=False)
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         results = await _run(
@@ -323,5 +336,58 @@ def test_host_without_admin_can_start(tmp_path):
         )
         assert "开赛" in results[0][1]
         assert plugin.store.load("g1", "testplat").status == "running"
+
+    asyncio.run(scenario())
+
+
+def test_create_room_name_and_optional_size(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        results = await _run(
+            plugin,
+            FakeEvent("u1", "房主", admin=False, text="major 创建房间 我的杯 16"),
+        )
+        assert "房间已创建" in results[0][1]
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.name == "我的杯"
+        assert tournament.size == 16
+        assert tournament.creator_id == "u1"
+
+        # 已有房间时不能重复创建
+        again = await _run(
+            plugin, FakeEvent("u2", "路人", text="major 创建房间 别的杯")
+        )
+        assert "已有房间" in again[0][1]
+
+        # 报名需要先有房间
+        await _run(plugin, FakeEvent("u1", "房主", admin=False, text="major 重置"))
+        join = await _run(plugin, FakeEvent("u2", "路人", text="major 报名"))
+        assert "创建房间" in join[0][1]
+
+        # 不带名称与规模：名称用默认，规模 0（开赛自动）
+        created = await _run(plugin, FakeEvent("u2", "路人", text="major 创建房间"))
+        assert "房间已创建" in created[0][1]
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.name
+        assert tournament.size == 0
+
+    asyncio.run(scenario())
+
+
+def test_room_size_is_used_at_start(tmp_path):
+    """创建房间时指定的规模，开赛时沿用（人数不足则轮空）。"""
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        await _run(
+            plugin,
+            FakeEvent("admin", "管理员", admin=True, text="major 创建房间 固定杯 16"),
+        )
+        for i in range(1, 6):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛"))
+        tournament = plugin.store.load("g1", "testplat")
+        assert tournament.size == 16
 
     asyncio.run(scenario())

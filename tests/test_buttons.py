@@ -229,17 +229,33 @@ def test_bare_major_sends_panel_on_qq_official(tmp_path):
 def test_button_press_data_runs_real_action(tmp_path):
     """按钮 data 就是命令文本，点击后走原有命令逻辑。"""
     plugin = _make_plugin(tmp_path)
-    event = FakeQQEvent(text="major 报名")
+    join_event = FakeQQEvent(text="major 报名")
 
     async def scenario():
-        return [item async for item in plugin.major(event)]
+        created = [
+            item
+            async for item in plugin.major(
+                FakeQQEvent(text="major 创建房间 测试杯", admin=True)
+            )
+        ]
+        assert created
+        return [item async for item in plugin.major(join_event)]
 
     results = asyncio.run(scenario())
     assert any("报名成功" in item[1] for item in results)
     # 报名后面板自动刷新
-    assert event.bot.api.calls
-    assert event.bot.api.calls[-1][1]["msg_type"] == 2
+    assert join_event.bot.api.calls
+    assert join_event.bot.api.calls[-1][1]["msg_type"] == 2
 
     tournament = plugin.store.load("group-openid", "qqplat")
     assert tournament is not None
     assert tournament.player_count == 1
+
+
+def test_panel_without_room_shows_create_button():
+    t = Tournament(group_id="g")
+    payload = build_panel_payload(t, can_manage=False, room_exists=False)
+    data = datas(payload)
+    assert "major 创建房间 " in data
+    assert "major 报名" not in data
+    assert "还没有创建房间" in payload["markdown"]["content"]

@@ -77,8 +77,15 @@ def build_command_button(
     }
 
 
-def build_status_markdown(tournament: Tournament) -> str:
+def build_status_markdown(tournament: Tournament, room_exists: bool = True) -> str:
     """生成按钮面板上方的说明文字（Markdown）。"""
+    if not room_exists:
+        return (
+            "🏠 还没有创建房间\n"
+            "房主点「🏠 创建房间」新建比赛，可继续补「名称 规模」\n"
+            "创建后大家点「📝 报名」加入"
+        )
+
     title = tournament.name or "MAJOR 锦标赛"
     lines = [f"🏆 {title}"]
     if tournament.status == STATUS_REGISTRATION:
@@ -135,12 +142,14 @@ def build_panel_keyboard(
     *,
     can_manage: bool = False,
     is_admin: bool | None = None,
+    room_exists: bool = True,
     max_winner_rows: int = 2,
 ) -> dict[str, Any]:
     """按赛事状态生成按钮键盘。
 
-    ``can_manage`` 表示触发面板的人是否有管理权限（房主或管理员）。
-    「🚀 开赛」按钮始终显示，方便房主随时开赛；其余管理按钮按权限显示。
+    - ``room_exists=False``：还没创建房间，只显示「🏠 创建房间」。
+    - ``can_manage``：触发面板的人是否有管理权限（房主或管理员）。
+    - 「🚀 开赛」按钮始终显示，方便房主随时开赛。
     """
     if is_admin is not None:  # 兼容旧参数名
         can_manage = can_manage or is_admin
@@ -168,19 +177,23 @@ def build_panel_keyboard(
     start_btn = build_command_button(
         "major_start", "🚀 开赛", "major 开赛", visited_label="已开赛"
     )
-    start_custom_btn = build_command_button(
-        "major_start_custom",
-        "✏️ 自定义开赛",
-        "major 开赛 ",
-        visited_label="已开赛",
+    create_room_btn = build_command_button(
+        "major_create_room",
+        "🏠 创建房间",
+        "major 创建房间 ",
+        visited_label="已创建",
         enter=True,
     )
 
-    if registration_open:
+    if not room_exists:
+        # 还没创建房间：只提供创建入口
+        rows.append({"buttons": [create_room_btn]})
+        rows.append({"buttons": [help_btn]})
+    elif registration_open:
         rows.append({"buttons": [signup, leave, players]})
         rows.append({"buttons": [bracket_btn, image_btn, history_btn, help_btn]})
         if can_manage:
-            rows.append({"buttons": [start_btn, start_custom_btn, reset_btn]})
+            rows.append({"buttons": [start_btn, reset_btn]})
         else:
             # 开赛按钮始终显示，方便房主直接开赛（点击时再做权限校验）
             rows.append({"buttons": [start_btn]})
@@ -197,8 +210,6 @@ def build_panel_keyboard(
                 rows.append({"buttons": [redraw_btn, reset_btn]})
                 rows.append({"buttons": [history_btn, help_btn]})
         else:
-            # 比赛进行中：也保留开赛按钮（此时点击会提示已开赛）
-            rows.append({"buttons": [start_btn]})
             rows.append({"buttons": [history_btn, help_btn]})
 
     return {"content": {"rows": rows[:MAX_ROWS]}}
@@ -209,16 +220,20 @@ def build_panel_payload(
     *,
     can_manage: bool = False,
     is_admin: bool | None = None,
+    room_exists: bool = True,
     max_winner_rows: int = 2,
 ) -> dict[str, Any]:
     """构造完整的 QQ 官方按钮消息 payload（未包含被动回复上下文）。"""
     return {
         "msg_type": 2,
-        "markdown": {"content": build_status_markdown(tournament)},
+        "markdown": {
+            "content": build_status_markdown(tournament, room_exists=room_exists)
+        },
         "keyboard": build_panel_keyboard(
             tournament,
             can_manage=can_manage,
             is_admin=is_admin,
+            room_exists=room_exists,
             max_winner_rows=max_winner_rows,
         ),
     }

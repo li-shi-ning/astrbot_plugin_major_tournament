@@ -93,6 +93,12 @@ ACTION_ALIASES = {
     "战绩": "记录",
     "历史": "记录",
     "history": "记录",
+    "创建房间": "创建房间",
+    "建房": "创建房间",
+    "创建比赛": "创建房间",
+    "创建": "创建房间",
+    "create": "创建房间",
+    "newroom": "创建房间",
     "重抽": "重抽",
     "重新抽签": "重抽",
     "重新抽": "重抽",
@@ -202,7 +208,8 @@ class MajorTournament(Star):
         return (
             "🏆 Major 赛制锦标赛\n"
             "———————————————\n"
-            "【参赛】\n"
+            "【房间 / 参赛】\n"
+            "  major 创建房间 [名称] [规模]  创建房间（规模可省略，开赛时自动）\n"
             "  major 报名            报名参赛\n"
             "  major 退赛            取消报名\n"
             "  major 名单            查看报名名单\n"
@@ -235,7 +242,11 @@ class MajorTournament(Star):
 
         if not action:
             # QQ 官方机器人：优先发按钮面板；其它平台回退文字帮助
-            if await self._send_button_panel(event, self._load_or_new(event)):
+            loaded = self._load(event)
+            tournament = loaded if loaded is not None else self._new(event)
+            if await self._send_button_panel(
+                event, tournament, room_exists=loaded is not None
+            ):
                 return
             yield event.plain_result(self._help_text())
             return
@@ -249,7 +260,10 @@ class MajorTournament(Star):
             yield event.plain_result("❌ 请在群聊中使用 Major 赛制命令。")
             return
 
-        if action == "报名":
+        if action == "创建房间":
+            async for item in self._handle_create_room(event, args):
+                yield item
+        elif action == "报名":
             async for item in self._handle_signup(event, args):
                 yield item
         elif action == "退赛":
@@ -292,7 +306,16 @@ class MajorTournament(Star):
             return
 
         # 报名/退赛/开赛/重置/判胜后自动刷新按钮面板
-        if action in {"报名", "退赛", "开赛", "重置", "胜", "命名", "重抽"}:
+        if action in {
+            "创建房间",
+            "报名",
+            "退赛",
+            "开赛",
+            "重置",
+            "胜",
+            "命名",
+            "重抽",
+        }:
             await self._maybe_send_button_panel(event)
 
     @filter.command("major面板", alias={"major按钮", "major菜单", "major_menu"})
@@ -311,7 +334,11 @@ class MajorTournament(Star):
                 "ℹ️ 按钮面板仅支持 QQ 官方机器人；其它平台请发送「major 帮助」。"
             )
             return
-        if await self._send_button_panel(event, self._load_or_new(event)):
+        loaded = self._load(event)
+        tournament = loaded if loaded is not None else self._new(event)
+        if await self._send_button_panel(
+            event, tournament, room_exists=loaded is not None
+        ):
             return
         yield event.plain_result(
             "❌ 按钮面板发送失败，可发送「major 帮助」查看文字指令。"
@@ -357,7 +384,7 @@ class MajorTournament(Star):
             await self._send_button_panel(event, tournament)
 
     async def _send_button_panel(
-        self, event: AstrMessageEvent, tournament: Tournament
+        self, event: AstrMessageEvent, tournament: Tournament, room_exists: bool = True
     ) -> bool:
         """通过 QQ 官方 API 发送 Markdown + 按钮键盘。成功返回 True。"""
         if not bool(self.config.get("buttons_enabled", True)):
@@ -372,7 +399,9 @@ class MajorTournament(Star):
             return False
 
         payload = build_panel_payload(
-            tournament, can_manage=self._ensure_host(event, tournament)
+            tournament,
+            can_manage=self._ensure_host(event, tournament),
+            room_exists=room_exists,
         )
         add_passive_reply_context(
             payload,
@@ -397,6 +426,49 @@ class MajorTournament(Star):
         return True
 
     # ────────────────────────── 各子命令 ──────────────────────────
+    async def _handle_create_room(self, event: AstrMessageEvent, args: list[str]):
+        existing = self._load(event)
+        if existing is not None:
+            yield event.plain_result(
+                "❌ 当前已有房间，如需重建请先「major 重置」（房主/管理员）。"
+            )
+            return
+
+        size = None
+        name_parts: list[str] = []
+        for arg in args:
+            if arg.isdigit():
+                size = int(arg)
+            else:
+                name_parts.append(arg)
+        if size is not None and size not in VALID_SIZES:
+            yield event.plain_result(
+                "❌ 规模只能是 2/4/8/16/32/64（不填则开赛时自动确定）。"
+            )
+            return
+
+        tournament = self._new(event)
+        name = " ".join(name_parts).strip()
+        if name:
+            tournament.name = name[:30]
+        if not tournament.name:
+            tournament.name = "MAJOR 锦标赛"
+        tournament.size = size or 0
+        tournament.status = STATUS_REGISTRATION
+        self._save(tournament)
+
+        size_text = (
+            f"{tournament.size} 强" if tournament.size > 0 else "开赛时按人数自动确定"
+        )
+        host_name = str(event.get_sender_name() or event.get_sender_id())
+        yield event.plain_result(
+            f"🏠 房间已创建：{tournament.name}\n"
+            f"房主：{host_name}\n"
+            f"规模：{size_text}\n"
+            f"大家发送「major 报名」或点「📝 报名」加入；"
+            f"人齐后房主点「🚀 开赛」。"
+        )
+
     async def _handle_signup(self, event: AstrMessageEvent, args: list[str]):
         user_id = str(event.get_sender_id() or "").strip()
         sender_name = str(event.get_sender_name() or "").strip() or user_id
@@ -405,10 +477,13 @@ class MajorTournament(Star):
 
         tournament = self._load(event)
         if tournament is None:
-            tournament = self._new(event)
+            yield event.plain_result(
+                "❌ 还没有房间。请房主先发送「major 创建房间 [名称] [规模]」。"
+            )
+            return
 
         if tournament.status != STATUS_REGISTRATION:
-            yield event.plain_result("❌ 当前赛事已开赛，无法报名。请等待管理员重置。")
+            yield event.plain_result("❌ 当前赛事已开赛，无法报名。请等待重置。")
             return
         if not tournament.add_player(user_id, sender_name):
             if tournament.find_player_index(user_id) >= 0:
@@ -425,9 +500,7 @@ class MajorTournament(Star):
         else:
             progress = f"当前 {tournament.player_count} 人（规模开赛时自动确定）。"
         yield event.plain_result(
-            f"✅ 报名成功：{sender_name}\n"
-            f"{progress}"
-            f"准备就绪后由管理员发送「major 开赛」。"
+            f"✅ 报名成功：{sender_name}\n{progress}准备就绪后由房主点「🚀 开赛」。"
         )
 
     async def _handle_leave(self, event: AstrMessageEvent):
@@ -452,7 +525,9 @@ class MajorTournament(Star):
     async def _handle_players(self, event: AstrMessageEvent):
         tournament = self._load(event)
         if tournament is None:
-            yield event.plain_result("ℹ️ 当前没有赛事。发送「major 报名」开始报名。")
+            yield event.plain_result(
+                "ℹ️ 当前没有房间。请房主先「major 创建房间 [名称] [规模]」。"
+            )
             return
         if not tournament.players:
             yield event.plain_result("ℹ️ 还没有人报名。")
@@ -495,7 +570,8 @@ class MajorTournament(Star):
     async def _handle_rename(self, event: AstrMessageEvent, args: list[str]):
         tournament = self._load(event)
         if tournament is None:
-            tournament = self._new(event)
+            yield event.plain_result("❌ 还没有房间。请先「major 创建房间」。")
+            return
         if not self._ensure_host(event, tournament):
             yield event.plain_result("❌ 只有房主或管理员可以修改比赛名称。")
             return
@@ -539,7 +615,8 @@ class MajorTournament(Star):
     async def _handle_add(self, event: AstrMessageEvent, args: list[str]):
         tournament = self._load(event)
         if tournament is None:
-            tournament = self._new(event)
+            yield event.plain_result("❌ 还没有房间。请房主先创建房间。")
+            return
         if not self._ensure_host(event, tournament):
             yield event.plain_result("❌ 只有房主或管理员可以使用「major 添加」。")
             return
@@ -608,7 +685,9 @@ class MajorTournament(Star):
             yield event.plain_result("❌ 至少需要 2 名选手才能开赛。")
             return
 
-        normalized = normalize_size(size, tournament.player_count)
+        # 未在开赛时指定规模 -> 用创建房间时的规模；创建时也没填 -> 自动
+        requested_size = size if size is not None else (tournament.size or None)
+        normalized = normalize_size(requested_size, tournament.player_count)
         if normalized > MAX_SIZE:
             yield event.plain_result(
                 f"❌ 报名 {tournament.player_count} 人，超过单败淘汰赛上限 "
