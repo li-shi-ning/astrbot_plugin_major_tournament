@@ -142,7 +142,9 @@ def test_non_host_cannot_judge(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
-        await _create_room(plugin, uid="admin", name="管理员", admin=True)
+        await _create_room(
+            plugin, uid="admin", name="管理员", admin=True, args="测试杯"
+        )
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         await _run(
@@ -236,7 +238,9 @@ def test_history_command_reads_database(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
-        await _create_room(plugin, uid="admin", name="管理员", admin=True)
+        await _create_room(
+            plugin, uid="admin", name="管理员", admin=True, args="测试杯"
+        )
         for i in range(1, 5):
             await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
         await _run(
@@ -258,7 +262,7 @@ def test_history_command_reads_database(tmp_path):
         results = await _run(plugin, FakeEvent("u1", "选手1", text="major 记录"))
         text = results[0][1]
         assert "比赛记录" in text
-        assert "major#1" in text
+        assert "测试杯" in text
 
         # 详情（用序号 1）
         detail = await _run(plugin, FakeEvent("u1", "选手1", text="major 详情 1"))

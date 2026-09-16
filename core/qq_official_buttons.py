@@ -279,15 +279,15 @@ def build_records_keyboard(
     page: int,
     total_pages: int,
 ) -> dict[str, Any]:
-    """比赛记录列表键盘：major#N 按钮 + 上一页/下一页。"""
+    """比赛记录列表键盘：赛事名称按钮 + 上一页/下一页。"""
     rows: list[dict[str, list[dict[str, Any]]]] = []
 
     buttons = [
         build_command_button(
             f"major_record_{entry['n']}",
-            f"major#{entry['n']}",
+            entry.get("label") or f"major#{entry['n']}",
             f"major 详情 {entry['id']}",
-            visited_label=f"major#{entry['n']}",
+            visited_label=entry.get("label") or f"major#{entry['n']}",
         )
         for entry in entries
     ]

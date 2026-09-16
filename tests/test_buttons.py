@@ -270,7 +270,7 @@ async def _run_qq(plugin, text, uid="u1", admin=False):
 
 
 def test_records_pagination_keyboard():
-    entries = [{"n": i, "id": f"id{i}"} for i in range(1, 8)]
+    entries = [{"n": i, "id": f"id{i}", "label": f"第{i}届杯"} for i in range(1, 8)]
     payload = build_records_payload("rec", entries[:5], page=1, total_pages=2)
     datas = [
         b["action"]["data"]
@@ -280,6 +280,11 @@ def test_records_pagination_keyboard():
     assert "major 详情 id1" in datas
     assert "major 记录 2" in datas  # 下一页
     assert "major 记录 0" not in datas
+    labels = [
+        b["render_data"]["label"]
+        for b in payload["keyboard"]["content"]["rows"][0]["buttons"]
+    ]
+    assert labels == ["第1届杯", "第2届杯", "第3届杯", "第4届杯", "第5届杯"]
 
     payload2 = build_records_payload("rec", entries[5:], page=2, total_pages=2)
     datas2 = [

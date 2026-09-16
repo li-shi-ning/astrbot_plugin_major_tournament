@@ -652,14 +652,20 @@ class MajorTournament(Star):
         )
         entries: list[dict[str, Any]] = []
         lines = [f"📜 比赛记录（第 {page}/{total_pages} 页 · 共 {total} 场）"]
+        names = [
+            (row["name"] or f"未命名比赛{offset + index + 1}")
+            for index, row in enumerate(rows)
+        ]
         for index, row in enumerate(rows):
             number = offset + index + 1
-            entries.append({"n": number, "id": row["tournament_id"]})
-            name = row["name"] or f"major#{number}"
+            name = names[index]
+            # 同一页出现重名时，用序号区分按钮
+            label = f"{name}#{number}" if names.count(name) > 1 else name
+            entries.append({"n": number, "id": row["tournament_id"], "label": label})
             champion = row.get("champion_name") or ""
             suffix = f" · 冠军 {champion}" if champion else ""
             lines.append(
-                f"major#{number} {name} · "
+                f"{number}. {name} · "
                 f"{self._record_status_text(row['status'])} · "
                 f"{row['player_count']}人{suffix}"
             )
@@ -683,10 +689,9 @@ class MajorTournament(Star):
         return self.store.load_by_id(text)
 
     def _format_record_detail(self, tournament: Tournament, rank: int) -> str:
-        prefix = f"major#{rank}" if rank > 0 else "major#?"
         title = tournament.name or "MAJOR 锦标赛"
         lines = [
-            f"🏆 {prefix} · {title}",
+            f"🏆 {title}",
             f"状态：{self._record_status_text(tournament.status)}",
             f"创建：{self._format_time(tournament.created_at)}",
             f"参赛人员（{tournament.player_count}）："
