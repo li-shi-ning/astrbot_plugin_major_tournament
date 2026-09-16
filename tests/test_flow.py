@@ -414,3 +414,23 @@ def test_record_display_name_fallback(tmp_path):
         == "未命名0916"
     )
     assert plugin._record_display_name({"name": "群友杯", "created_at": ""}) == "群友杯"
+
+
+def test_render_scale_selection(tmp_path):
+    """清晰度档位：默认 ultra；大阵容自动降档；配置可强制。"""
+    plugin = _make_plugin(tmp_path)
+
+    small = {"width": 982, "height": 500}
+    assert plugin._pick_render_scales(small)[0] == "ultra"
+
+    big = {"width": 1482, "height": 1892}
+    scales = plugin._pick_render_scales(big)
+    assert scales[0] in {"high", "normal"}
+    order = ["ultra", "high", "normal"]
+    assert scales == sorted(scales, key=order.index)
+
+    plugin.config = {"image_scale": "normal"}
+    assert plugin._pick_render_scales(small) == ["normal"]
+
+    plugin.config = {"image_scale": "high"}
+    assert plugin._pick_render_scales(small)[0] == "high"

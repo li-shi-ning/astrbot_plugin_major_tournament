@@ -139,7 +139,11 @@
 2. 调用 AstrBot 的 `self.html_render(html, {}, return_url=False, options=...)`，由 T2I 服务把 HTML 转成图片字节；
 3. 通过 `event.make_result().base64_image(...)` 发送，避免 OneBot / QQ 官方机器人访问不到内部地址。
 
-> 8 人约 1010×600，16 人约 1232×600，32 人约 1482×1892；页面用 `min-width:max-content` 保证超宽时不会被裁切。
+> - **清晰度**：默认用 `device_scale_factor_level=ultra`（约 1.8x 像素密度），字和人像都更清晰；
+>   大阵容按像素预算自动降档（ultra → high → normal），渲染失败也会自动降档重试。
+> - **尺寸**：按内容设置视口，不留大片空白。实测 8 人约 1014×608（normal）/ 1825×1094（ultra），
+>   16 人 1264×1072 / 32 人 1514×2000。
+> - 可在插件配置里把 `image_scale` 设为 `normal` / `high` / `ultra`。
 
 ## 🧪 测试
 

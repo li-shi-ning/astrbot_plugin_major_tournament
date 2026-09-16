@@ -955,15 +955,63 @@ class MajorTournament(Star):
             if data_uri
         }
 
+    #: device_scale_factor_level -> 大致像素倍率（用于估算图片大小）
+    _SCALE_RATIOS = {"normal": 1.0, "high": 1.35, "ultra": 1.8}
+
+    #: 单张图片允许的最大像素数，超过就自动降一档，避免图片过大
+    _MAX_IMAGE_PIXELS = 8_000_000
+
+    def _pick_render_scales(self, layout: dict[str, Any]) -> list[str]:
+        """按配置与内容大小挑渲染档位（清晰优先，过大自动降档）。
+
+        返回按优先级排列的 device_scale_factor_level 列表，逐个尝试。
+        """
+        requested = (
+            str(self.config.get("image_scale", "ultra") or "ultra").strip().lower()
+        )
+        order = ["ultra", "high", "normal"]
+        if requested not in order:
+            requested = "ultra"
+        candidates = order[order.index(requested) :]
+        base_pixels = max(1, int(layout.get("width", 0)) * int(layout.get("height", 0)))
+        affordable = [
+            scale
+            for scale in candidates
+            if base_pixels * self._SCALE_RATIOS[scale] ** 2 <= self._MAX_IMAGE_PIXELS
+        ]
+        return affordable or [candidates[-1]]
+
     async def _render_bracket_image(
         self, tournament: Tournament, event: AstrMessageEvent
     ):
-        """调用 AstrBot T2I 渲染对阵图，返回 bytes 或 URL/路径。"""
+        """调用 AstrBot T2I 渲染对阵图，返回 bytes 或 URL/路径。
+
+        默认用最高清晰度，失败或图片过大时自动降档重试。
+        """
         avatar_map = await self._collect_avatar_map(tournament, event)
         html = self.renderer.render_html(tournament, avatar_map=avatar_map)
-        # 宽度由 HTML 内容撑开（模板里已做 min-width:max-content），无需额外指定视口
-        options = {"type": "png", "full_page": True, "quality": 95}
-        return await self.html_render(html, {}, return_url=False, options=options)
+        layout = self.renderer.build_bracket_layout(tournament, avatar_map=avatar_map)
+
+        last_error: Exception | None = None
+        for scale in self._pick_render_scales(layout):
+            options = {
+                "type": "png",
+                "full_page": True,
+                "quality": 100,
+                "device_scale_factor_level": scale,
+            }
+            try:
+                result = await self.html_render(
+                    html, {}, return_url=False, options=options
+                )
+                if result:
+                    return result
+            except Exception as exc:  # noqa: BLE001 - 高清失败则降档重试
+                last_error = exc
+                logger.warning(f"[Major] T2I 渲染档位 {scale} 失败，尝试降档: {exc}")
+        if last_error is not None:
+            raise last_error
+        return None
 
     @staticmethod
     async def _yield_bracket_image(event: AstrMessageEvent, result):

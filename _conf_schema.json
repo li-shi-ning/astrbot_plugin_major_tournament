@@ -33,6 +33,17 @@
         "type": "bool",
         "default": true,
         "hint": "报名/退赛/开赛/判胜/重置后，自动重发最新的按钮面板。"
+      },
+      "image_scale": {
+        "description": "对阵图清晰度",
+        "type": "string",
+        "options": [
+          "ultra",
+          "high",
+          "normal"
+        ],
+        "default": "ultra",
+        "hint": "ultra 最清晰（约 1.8x 像素密度）但图片更大；大阵容会自动降档避免图片过大。"
       }
     }
   }
