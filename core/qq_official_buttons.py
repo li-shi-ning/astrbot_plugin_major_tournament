@@ -14,7 +14,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from .bracket import pending_matches
+from .bracket import has_decided_real_match, pending_matches
 from .models import (
     STATUS_FINISHED,
     STATUS_REGISTRATION,
@@ -145,6 +145,9 @@ def build_panel_keyboard(
     image_btn = build_command_button("major_image", "🖼 对阵图", "major 图")
     help_btn = build_command_button("major_help", "❓ 帮助", "major 帮助")
     history_btn = build_command_button("major_history", "📜 记录", "major 记录")
+    redraw_btn = build_command_button(
+        "major_redraw", "🎲 重抽", "major 重抽", visited_label="已重抽"
+    )
     reset_btn = build_command_button(
         "major_reset", "🗑 重置", "major 重置", visited_label="已重置"
     )
@@ -164,7 +167,11 @@ def build_panel_keyboard(
                 pending_matches(tournament)[:max_winner_rows]
             ):
                 rows.append({"buttons": _winner_buttons(tournament, match, offset)})
-            rows.append({"buttons": [reset_btn, history_btn, help_btn]})
+            if has_decided_real_match(tournament):
+                rows.append({"buttons": [reset_btn, history_btn, help_btn]})
+            else:
+                rows.append({"buttons": [redraw_btn, reset_btn]})
+                rows.append({"buttons": [history_btn, help_btn]})
         else:
             rows.append({"buttons": [history_btn, help_btn]})
 

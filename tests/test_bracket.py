@@ -168,3 +168,35 @@ def test_oversized_bracket_does_not_finish_immediately():
     assert t.status != STATUS_FINISHED
     # 至少还有一场真实对局待打
     assert len(bk.pending_matches(t)) >= 1
+
+
+def test_draw_is_random_and_players_reordered():
+    """默认开赛应随机抽签，并让 players 顺序 = 抽签顺序。"""
+    orders = set()
+    for _ in range(10):
+        t = make_tournament(8)
+        bk.start_tournament(t, size=8)  # 默认 random
+        assert [p.seed for p in t.players] == list(range(1, 9))
+        orders.add(tuple(p.name for p in t.players))
+    # 10 次抽签完全相同的概率可忽略
+    assert len(orders) > 1
+
+
+def test_register_mode_keeps_registration_order():
+    t = make_tournament(8)
+    bk.start_tournament(t, size=8, seed_mode="register")
+    assert [p.name for p in t.players] == [f"P{i}" for i in range(1, 9)]
+
+
+def test_redraw_allowed_before_result_and_blocked_after():
+    t = make_tournament(8)
+    bk.start_tournament(t, size=8)
+    ok, _ = bk.redraw(t)
+    assert ok
+    assert [p.seed for p in t.players] == list(range(1, 9))
+
+    match = bk.pending_matches(t)[0]
+    bk.set_winner(t, match.match_id, "1", 2, 0)
+    ok, message = bk.redraw(t)
+    assert not ok
+    assert "无法" in message

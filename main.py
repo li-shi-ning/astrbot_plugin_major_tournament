@@ -25,6 +25,7 @@ from .core.bracket import (
     VALID_SIZES,
     normalize_size,
     pending_matches,
+    redraw,
     set_winner,
     start_tournament,
 )
@@ -91,6 +92,12 @@ ACTION_ALIASES = {
     "战绩": "记录",
     "历史": "记录",
     "history": "记录",
+    "重抽": "重抽",
+    "重新抽签": "重抽",
+    "重新抽": "重抽",
+    "抽签": "重抽",
+    "redraw": "重抽",
+    "shuffle": "重抽",
 }
 
 
@@ -173,6 +180,14 @@ class MajorTournament(Star):
             return f"{tournament.size} 强"
         return "开赛时自动确定"
 
+    @staticmethod
+    def _draw_text(tournament: Tournament, limit: int = 16) -> str:
+        ordered = sorted(tournament.players, key=lambda p: p.seed or 999)
+        shown = "、".join(f"{p.seed}.{p.name}" for p in ordered[:limit])
+        if len(ordered) > limit:
+            shown += f" 等 {len(ordered)} 人"
+        return shown
+
     def _help_text(self) -> str:
         return (
             "🏆 Major 赛制锦标赛\n"
@@ -184,6 +199,7 @@ class MajorTournament(Star):
             "【开赛 / 查看】\n"
             "  major 开赛 [规模] [名称] 开赛；不填规模按人数自动确定\n"
             "  major 命名 <名称>     修改比赛名称（管理员）\n"
+            "  major 重抽            重新随机抽签（开赛后、未有结果前）\n"
             "  major 记录 [数量]     查询最近的比赛结果记录\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
@@ -249,6 +265,9 @@ class MajorTournament(Star):
         elif action == "命名":
             async for item in self._handle_rename(event, args):
                 yield item
+        elif action == "重抽":
+            async for item in self._handle_redraw(event, args):
+                yield item
         elif action == "记录":
             async for item in self._handle_history(event, args):
                 yield item
@@ -262,7 +281,7 @@ class MajorTournament(Star):
             return
 
         # 报名/退赛/开赛/重置/判胜后自动刷新按钮面板
-        if action in {"报名", "退赛", "开赛", "重置", "胜", "命名"}:
+        if action in {"报名", "退赛", "开赛", "重置", "胜", "命名", "重抽"}:
             await self._maybe_send_button_panel(event)
 
     @filter.command("major面板", alias={"major按钮", "major菜单", "major_menu"})
@@ -415,9 +434,35 @@ class MajorTournament(Star):
             f"规模：{self._size_text(tournament)}",
             "———————————————",
         ]
-        for index, player in enumerate(tournament.players, start=1):
-            lines.append(f"{index}. {player.name}")
+        if tournament.status == STATUS_REGISTRATION:
+            lines.append("报名序号（开赛时随机抽签）：")
+            for index, player in enumerate(tournament.players, start=1):
+                lines.append(f"  {index}. {player.name}")
+        else:
+            lines.append("抽签种子（随机）：")
+            for player in sorted(tournament.players, key=lambda p: p.seed or 999):
+                lines.append(f"  种子{player.seed}. {player.name}")
         yield event.plain_result("\n".join(lines))
+
+    async def _handle_redraw(self, event: AstrMessageEvent, args: list[str]):
+        if not event.is_admin():
+            yield event.plain_result("❌ 只有管理员可以重新抽签。")
+            return
+        tournament = self._load(event)
+        if tournament is None:
+            yield event.plain_result("ℹ️ 当前没有赛事。")
+            return
+        seed_mode = (
+            "register" if any(a in {"报名", "register"} for a in args) else "random"
+        )
+        ok, message = redraw(tournament, seed_mode=seed_mode)
+        if not ok:
+            yield event.plain_result(f"❌ {message}")
+            return
+        self._save(tournament)
+        yield event.plain_result(
+            f"✅ {message}\n🎲 新抽签结果：{self._draw_text(tournament)}"
+        )
 
     async def _handle_rename(self, event: AstrMessageEvent, args: list[str]):
         if not event.is_admin():
@@ -554,6 +599,7 @@ class MajorTournament(Star):
         lines = [
             f"🚀 {tournament.name or 'Major 锦标赛'} 开赛！",
             f"规模：{tournament.size} 强 ｜ 选手：{tournament.player_count} 人",
+            f"🎲 随机抽签结果：{self._draw_text(tournament)}",
             f"首轮对阵已生成，共 {len(pending)} 场待判定。",
             "发送「major 对阵」查看文字赛程，或「major 图」查看对阵图。",
         ]

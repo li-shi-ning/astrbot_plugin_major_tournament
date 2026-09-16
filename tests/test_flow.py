@@ -264,3 +264,44 @@ def test_open_with_custom_name(tmp_path):
         assert tournament.size == 4
 
     asyncio.run(scenario())
+
+
+def test_start_announces_draw_and_list_shows_seeds(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 9):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+
+        start_results = await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛 8")
+        )
+        assert "随机抽签" in start_results[0][1]
+
+        list_results = await _run(plugin, FakeEvent("u1", "选手1", text="major 名单"))
+        assert "抽签种子" in list_results[0][1]
+
+    asyncio.run(scenario())
+
+
+def test_redraw_command(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 9):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛 8")
+        )
+
+        # 非管理员不能重抽
+        denied = await _run(plugin, FakeEvent("u1", "选手1", text="major 重抽"))
+        assert "管理员" in denied[0][1]
+
+        # 管理员可以重抽
+        allowed = await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 重抽")
+        )
+        assert "重新抽签" in allowed[0][1]
+
+    asyncio.run(scenario())

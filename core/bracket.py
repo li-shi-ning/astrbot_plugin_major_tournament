@@ -201,22 +201,21 @@ def _auto_advance_byes(tournament: Tournament) -> None:
                     changed = True
 
 
-def start_tournament(
-    tournament: Tournament,
-    size: int | None = None,
-    seed_mode: str = "random",
+def draw_and_place(
+    tournament: Tournament, size: int, seed_mode: str = "random"
 ) -> None:
-    """开始比赛：分配规模、种子，生成对阵并处理轮空。"""
-    size = normalize_size(size, len(tournament.players))
-    tournament.size = size
-    tournament.status = STATUS_RUNNING
-    tournament.champion = None
-    tournament.rounds = build_rounds(size)
+    """抽签并生成首轮对阵。
 
+    抽签是「随机」的（默认）：把选手随机打乱后依次分配种子 1..N，
+    再把种子按标准排位放入对阵表。抽签结果会写回 ``tournament.players``，
+    因此名单 / 数据库里的顺序也就是抽签顺序，而不再是报名顺序。
+    """
+    tournament.rounds = build_rounds(size)
     ordered = _assign_seeds(tournament.players, seed_mode)
+    tournament.players = ordered  # 存储顺序 = 抽签顺序
+
     order = seed_order(size)
     by_seed: dict[int, str] = {p.seed: p.user_id for p in ordered}
-
     first_round = tournament.rounds[0]
     for i, match in enumerate(first_round.matches):
         match.p1 = by_seed.get(order[2 * i])
@@ -224,7 +223,42 @@ def start_tournament(
         refresh_match(match)
 
     _auto_advance_byes(tournament)
+
+
+def start_tournament(
+    tournament: Tournament,
+    size: int | None = None,
+    seed_mode: str = "random",
+) -> None:
+    """开始比赛：按人数确定规模，随机抽签并生成对阵。"""
+    size = normalize_size(size, len(tournament.players))
+    tournament.size = size
+    tournament.status = STATUS_RUNNING
+    tournament.champion = None
+    draw_and_place(tournament, size, seed_mode)
     tournament.touch()
+
+
+def has_decided_real_match(tournament: Tournament) -> bool:
+    """是否已经产生过真实对局结果（轮空不算）。"""
+    for round_ in tournament.rounds:
+        for match in round_.matches:
+            if match.winner and match.p1 and match.p2:
+                return True
+    return False
+
+
+def redraw(tournament: Tournament, seed_mode: str = "random") -> tuple[bool, str]:
+    """重新抽签（仅限还没有真实比赛结果时）。"""
+    if tournament.status == STATUS_REGISTRATION:
+        return False, "赛事尚未开始。"
+    if has_decided_real_match(tournament):
+        return False, "已经有比赛结果了，无法重新抽签。"
+    tournament.champion = None
+    tournament.status = STATUS_RUNNING
+    draw_and_place(tournament, tournament.size, seed_mode)
+    tournament.touch()
+    return True, "已重新抽签，对阵已按新的随机顺序生成。"
 
 
 def find_match(tournament: Tournament, match_id: str) -> Match | None:
