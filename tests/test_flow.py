@@ -131,7 +131,8 @@ def test_full_tournament_flow(tmp_path):
     asyncio.run(scenario())
 
 
-def test_non_admin_cannot_judge(tmp_path):
+def test_non_host_cannot_judge(tmp_path):
+    """非房主、非管理员不能判胜（u1 是创建者，改用 u2）。"""
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
@@ -142,9 +143,9 @@ def test_non_admin_cannot_judge(tmp_path):
         )
 
         results = await _run(
-            plugin, FakeEvent("u1", "选手1", admin=False, text="major 胜 R4-1 1")
+            plugin, FakeEvent("u2", "选手2", admin=False, text="major 胜 R4-1 1")
         )
-        assert "管理员" in results[0][1]
+        assert "房主" in results[0][1] or "管理员" in results[0][1]
 
     asyncio.run(scenario())
 
@@ -199,16 +200,19 @@ def test_registration_not_capped_and_auto_size(tmp_path):
     asyncio.run(scenario())
 
 
-def test_rename_requires_admin_and_persists(tmp_path):
+def test_rename_permission_and_persist(tmp_path):
     plugin = _make_plugin(tmp_path)
 
     async def scenario():
-        results = await _run(
-            plugin,
-            FakeEvent("u1", "选手1", admin=False, text="major 命名 我的杯"),
+        # u1 报名成房主
+        await _run(plugin, FakeEvent("u1", "选手1", text="major 报名"))
+        # u2 非房主非管理员 -> 不能改名
+        denied = await _run(
+            plugin, FakeEvent("u2", "选手2", admin=False, text="major 命名 我的杯")
         )
-        assert "管理员" in results[0][1]
+        assert "房主" in denied[0][1] or "管理员" in denied[0][1]
 
+        # 管理员可以改名
         results = await _run(
             plugin,
             FakeEvent("admin", "管理员", admin=True, text="major 命名 群友 MAJOR 杯"),
@@ -294,14 +298,30 @@ def test_redraw_command(tmp_path):
             plugin, FakeEvent("admin", "管理员", admin=True, text="major 开赛 8")
         )
 
-        # 非管理员不能重抽
-        denied = await _run(plugin, FakeEvent("u1", "选手1", text="major 重抽"))
-        assert "管理员" in denied[0][1]
+        # 非房主、非管理员不能重抽（u1 是房主，改用 u2）
+        denied = await _run(plugin, FakeEvent("u2", "选手2", text="major 重抽"))
+        assert "房主" in denied[0][1] or "管理员" in denied[0][1]
 
         # 管理员可以重抽
         allowed = await _run(
             plugin, FakeEvent("admin", "管理员", admin=True, text="major 重抽")
         )
         assert "重新抽签" in allowed[0][1]
+
+    asyncio.run(scenario())
+
+
+def test_host_without_admin_can_start(tmp_path):
+    """房主不是管理员也能开赛。"""
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        for i in range(1, 5):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        results = await _run(
+            plugin, FakeEvent("u1", "选手1", admin=False, text="major 开赛 4")
+        )
+        assert "开赛" in results[0][1]
+        assert plugin.store.load("g1", "testplat").status == "running"
 
     asyncio.run(scenario())

@@ -158,6 +158,7 @@ class MajorTournament(Star):
             platform_id=self._platform_id(event),
             size=int(self.config.get("default_size", 0) or 0),
             name=str(self.config.get("default_name", "") or ""),
+            creator_id=str(event.get_sender_id() or ""),
         )
 
     @staticmethod
@@ -207,18 +208,19 @@ class MajorTournament(Star):
             "  major 名单            查看报名名单\n"
             "【开赛 / 查看】\n"
             "  major 开赛 [名称] [规模] 开赛（规模可选，放最后）\n"
-            "  major 命名 <名称>     修改比赛名称（管理员）\n"
-            "  major 重抽            重新随机抽签（开赛后、未有结果前）\n"
+            "  major 命名 <名称>     修改比赛名称（房主/管理员）\n"
+            "  major 重抽            重新随机抽签（房主/管理员）\n"
             "  major 记录 [数量]     查询最近的比赛结果记录\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
-            "【人工判定】（管理员）\n"
+            "【人工判定】（房主/管理员）\n"
             "  major 胜 <编号> <1|2|名字> [比分]\n"
             "     例：major 胜 R16-3 1 2:1\n"
             "  major 添加 <账号> [名字]   帮他人报名\n"
             "  major 重置            删除当前赛事\n"
             "———————————————\n"
-            "提示：赛程开赛后，每场由管理员手动判胜，胜者自动晋级。"
+            "房主 = 第一个创建赛事（首次报名/命名）的人。\n"
+            "开赛按钮始终显示，但只有房主或管理员可以开赛；重置同样仅限房主/管理员。"
         )
 
     # ────────────────────────── 主命令 ──────────────────────────
@@ -316,6 +318,21 @@ class MajorTournament(Star):
         )
 
     # ────────────────────────── 按钮面板 ──────────────────────────
+    def _ensure_host(self, event: AstrMessageEvent, tournament: Tournament) -> bool:
+        """是否为房主或管理员。
+
+        房主 = 创建赛事的人；管理员始终可以管理。
+        兼容没有 creator_id 的旧赛事：第一个来管理的人自动成为房主。
+        """
+        if event.is_admin():
+            return True
+        sender = str(event.get_sender_id() or "").strip()
+        creator = str(getattr(tournament, "creator_id", "") or "").strip()
+        if not creator:
+            tournament.creator_id = sender
+            return True
+        return bool(sender) and sender == creator
+
     def _load_or_new(self, event: AstrMessageEvent) -> Tournament:
         tournament = self._load(event)
         if tournament is None:
@@ -354,7 +371,9 @@ class MajorTournament(Star):
         if raw_message is None or api is None:
             return False
 
-        payload = build_panel_payload(tournament, is_admin=event.is_admin())
+        payload = build_panel_payload(
+            tournament, can_manage=self._ensure_host(event, tournament)
+        )
         add_passive_reply_context(
             payload,
             msg_id=extract_message_reference_id(raw_message, message_obj),
@@ -454,12 +473,12 @@ class MajorTournament(Star):
         yield event.plain_result("\n".join(lines))
 
     async def _handle_redraw(self, event: AstrMessageEvent, args: list[str]):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以重新抽签。")
-            return
         tournament = self._load(event)
         if tournament is None:
             yield event.plain_result("ℹ️ 当前没有赛事。")
+            return
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以重新抽签。")
             return
         seed_mode = (
             "register" if any(a in {"报名", "register"} for a in args) else "random"
@@ -474,8 +493,11 @@ class MajorTournament(Star):
         )
 
     async def _handle_rename(self, event: AstrMessageEvent, args: list[str]):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以修改比赛名称。")
+        tournament = self._load(event)
+        if tournament is None:
+            tournament = self._new(event)
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以修改比赛名称。")
             return
         name = " ".join(args).strip()
         if not name:
@@ -483,9 +505,6 @@ class MajorTournament(Star):
                 "用法：major 命名 <比赛名称>\n例：major 命名 群友 MAJOR 杯"
             )
             return
-        tournament = self._load(event)
-        if tournament is None:
-            tournament = self._new(event)
         tournament.name = name[:30]
         self._save(tournament)
         yield event.plain_result(f"✅ 比赛名称已设置为「{tournament.name}」。")
@@ -518,8 +537,11 @@ class MajorTournament(Star):
         yield event.plain_result("\n".join(lines))
 
     async def _handle_add(self, event: AstrMessageEvent, args: list[str]):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以使用「major 添加」。")
+        tournament = self._load(event)
+        if tournament is None:
+            tournament = self._new(event)
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以使用「major 添加」。")
             return
 
         targets = self._extract_mentions(event)
@@ -536,9 +558,6 @@ class MajorTournament(Star):
             )
             return
 
-        tournament = self._load(event)
-        if tournament is None:
-            tournament = self._new(event)
         if tournament.status != STATUS_REGISTRATION:
             yield event.plain_result("❌ 已开赛，无法添加选手。")
             return
@@ -559,13 +578,12 @@ class MajorTournament(Star):
         yield event.plain_result(f"✅ 已添加：{'、'.join(added)}。{progress}")
 
     async def _handle_start(self, event: AstrMessageEvent, args: list[str]):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以开赛。")
-            return
-
         tournament = self._load(event)
         if tournament is None or not tournament.players:
             yield event.plain_result("❌ 还没有人报名，无法开赛。")
+            return
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以开赛。")
             return
         if tournament.status == STATUS_RUNNING:
             yield event.plain_result("❌ 赛事已经开始了。发送「major 对阵」查看赛程。")
@@ -757,9 +775,6 @@ class MajorTournament(Star):
         yield event.plain_result("❌ 对阵图渲染失败，请稍后重试。")
 
     async def _handle_winner(self, event: AstrMessageEvent, args: list[str]):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以判定胜负。")
-            return
         if len(args) < 2:
             yield event.plain_result(
                 "用法：major 胜 <比赛编号> <1|2|选手名字> [比分]\n"
@@ -770,6 +785,9 @@ class MajorTournament(Star):
         tournament = self._load(event)
         if tournament is None:
             yield event.plain_result("ℹ️ 当前没有赛事。")
+            return
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以判定胜负。")
             return
 
         match_id = args[0]
@@ -800,8 +818,12 @@ class MajorTournament(Star):
                 yield event.plain_result(f"⚠️ 自动对阵图渲染失败：{exc}")
 
     async def _handle_reset(self, event: AstrMessageEvent):
-        if not event.is_admin():
-            yield event.plain_result("❌ 只有管理员可以重置赛事。")
+        tournament = self._load(event)
+        if tournament is None:
+            yield event.plain_result("ℹ️ 当前没有可删除的赛事。")
+            return
+        if not self._ensure_host(event, tournament):
+            yield event.plain_result("❌ 只有房主或管理员可以重置赛事。")
             return
         deleted = self.store.delete(self._group_id(event), self._platform_id(event))
         if not deleted:

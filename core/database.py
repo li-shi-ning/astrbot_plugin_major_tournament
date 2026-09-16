@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
     size          INTEGER NOT NULL DEFAULT 0,
     status        TEXT NOT NULL DEFAULT 'registration',
     champion      TEXT,
+    creator_id    TEXT NOT NULL DEFAULT '',
     active        INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT ''
@@ -102,7 +103,18 @@ class TournamentDatabase:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
+            self._migrate_schema()
             self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        """为旧版本数据库补齐新增列（CREATE TABLE IF NOT EXISTS 不会补列）。"""
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(tournaments)")
+        }
+        if "creator_id" not in columns:
+            self._conn.execute(
+                "ALTER TABLE tournaments ADD COLUMN creator_id TEXT NOT NULL DEFAULT ''"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -129,6 +141,7 @@ class TournamentDatabase:
                 size=int(row["size"]),
                 status=row["status"],
                 champion=row["champion"],
+                creator_id=row["creator_id"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 tournament_id=row["tournament_id"],
@@ -233,8 +246,8 @@ class TournamentDatabase:
                 """
                 INSERT INTO tournaments (
                     tournament_id, group_id, platform_id, name, size, status,
-                    champion, active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    champion, creator_id, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(tournament_id) DO UPDATE SET
                     group_id = excluded.group_id,
                     platform_id = excluded.platform_id,
@@ -242,6 +255,7 @@ class TournamentDatabase:
                     size = excluded.size,
                     status = excluded.status,
                     champion = excluded.champion,
+                    creator_id = excluded.creator_id,
                     active = 1,
                     updated_at = excluded.updated_at
                 """,
@@ -253,6 +267,7 @@ class TournamentDatabase:
                     int(tournament.size),
                     tournament.status,
                     tournament.champion,
+                    tournament.creator_id,
                     tournament.created_at,
                     tournament.updated_at,
                 ),

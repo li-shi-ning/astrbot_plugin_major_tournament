@@ -70,11 +70,13 @@ def test_registration_panel_has_signup_and_admin_buttons():
     assert len(payload["keyboard"]["content"]["rows"]) <= 5
 
 
-def test_non_admin_registration_panel_has_no_admin_buttons():
+def test_non_manage_panel_still_has_start_button():
+    """开赛按钮应常驻；管理按钮（自定义开赛/重置）按权限显示。"""
     t = make_tournament()
-    data = datas(build_panel_payload(t, is_admin=False))
+    data = datas(build_panel_payload(t, can_manage=False))
     assert "major 报名" in data
-    assert "major 开赛" not in data
+    assert "major 开赛" in data
+    assert "major 开赛 " not in data
     assert "major 重置" not in data
 
 

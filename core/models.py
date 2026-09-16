@@ -128,6 +128,8 @@ class Tournament:
     updated_at: str = field(default_factory=now_iso)
     #: 唯一赛事 ID，用于数据库记录与历史归档
     tournament_id: str = field(default_factory=new_tournament_id)
+    #: 创建者（房主）的 user_id，房主可开赛/判胜/重置
+    creator_id: str = ""
 
     # ────────── 查询 ──────────
     def get_player(self, user_id: str | None) -> Player | None:
@@ -199,6 +201,7 @@ class Tournament:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "tournament_id": self.tournament_id,
+            "creator_id": self.creator_id,
         }
 
     @classmethod
@@ -216,4 +219,5 @@ class Tournament:
             created_at=str(data.get("created_at", now_iso())),
             updated_at=str(data.get("updated_at", now_iso())),
             tournament_id=str(data.get("tournament_id") or new_tournament_id()),
+            creator_id=str(data.get("creator_id", "") or ""),
         )

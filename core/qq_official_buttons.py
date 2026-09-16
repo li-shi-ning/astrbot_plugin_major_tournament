@@ -87,6 +87,7 @@ def build_status_markdown(tournament: Tournament) -> str:
         else:
             progress = f"{tournament.player_count} 人（规模开赛时自动确定）"
         lines.append(f"报名中：{progress}　点击下方按钮即可参赛")
+        lines.append("准备就绪后，房主点「🚀 开赛」即可开始")
     elif tournament.status == STATUS_RUNNING:
         pending = pending_matches(tournament)
         lines.append(f"进行中 · 待判定 {len(pending)} 场")
@@ -132,9 +133,17 @@ def _winner_buttons(
 def build_panel_keyboard(
     tournament: Tournament,
     *,
-    is_admin: bool = False,
+    can_manage: bool = False,
+    is_admin: bool | None = None,
     max_winner_rows: int = 2,
 ) -> dict[str, Any]:
+    """按赛事状态生成按钮键盘。
+
+    ``can_manage`` 表示触发面板的人是否有管理权限（房主或管理员）。
+    「🚀 开赛」按钮始终显示，方便房主随时开赛；其余管理按钮按权限显示。
+    """
+    if is_admin is not None:  # 兼容旧参数名
+        can_manage = can_manage or is_admin
     """按赛事状态生成按钮键盘。"""
     rows: list[dict[str, list[dict[str, Any]]]] = []
     registration_open = tournament.status == STATUS_REGISTRATION
@@ -170,11 +179,14 @@ def build_panel_keyboard(
     if registration_open:
         rows.append({"buttons": [signup, leave, players]})
         rows.append({"buttons": [bracket_btn, image_btn, history_btn, help_btn]})
-        if is_admin:
+        if can_manage:
             rows.append({"buttons": [start_btn, start_custom_btn, reset_btn]})
+        else:
+            # 开赛按钮始终显示，方便房主直接开赛（点击时再做权限校验）
+            rows.append({"buttons": [start_btn]})
     else:
         rows.append({"buttons": [players, bracket_btn, image_btn]})
-        if is_admin:
+        if can_manage:
             for offset, match in enumerate(
                 pending_matches(tournament)[:max_winner_rows]
             ):
@@ -185,6 +197,8 @@ def build_panel_keyboard(
                 rows.append({"buttons": [redraw_btn, reset_btn]})
                 rows.append({"buttons": [history_btn, help_btn]})
         else:
+            # 比赛进行中：也保留开赛按钮（此时点击会提示已开赛）
+            rows.append({"buttons": [start_btn]})
             rows.append({"buttons": [history_btn, help_btn]})
 
     return {"content": {"rows": rows[:MAX_ROWS]}}
@@ -193,7 +207,8 @@ def build_panel_keyboard(
 def build_panel_payload(
     tournament: Tournament,
     *,
-    is_admin: bool = False,
+    can_manage: bool = False,
+    is_admin: bool | None = None,
     max_winner_rows: int = 2,
 ) -> dict[str, Any]:
     """构造完整的 QQ 官方按钮消息 payload（未包含被动回复上下文）。"""
@@ -201,7 +216,10 @@ def build_panel_payload(
         "msg_type": 2,
         "markdown": {"content": build_status_markdown(tournament)},
         "keyboard": build_panel_keyboard(
-            tournament, is_admin=is_admin, max_winner_rows=max_winner_rows
+            tournament,
+            can_manage=can_manage,
+            is_admin=is_admin,
+            max_winner_rows=max_winner_rows,
         ),
     }
 
