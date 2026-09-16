@@ -52,8 +52,13 @@ def build_command_button(
     visited_label: str | None = None,
     permission: dict[str, Any] | None = None,
     style: int = 1,
+    enter: bool = False,
 ) -> dict[str, Any]:
-    """构造一个 ``action.type = 2`` 的 QQ 官方指令按钮。"""
+    """构造一个 ``action.type = 2`` 的 QQ 官方指令按钮。
+
+    ``enter=True`` 时按钮为「输入框按钮」：点击后不直接发送，而是把 data
+    填入输入框，用户可继续补充参数（用于「开赛 名称 规模」这种带参指令）。
+    """
     return {
         "id": button_id,
         "render_data": {
@@ -66,7 +71,7 @@ def build_command_button(
             "permission": dict(permission or {"type": 2}),
             "data": data,
             "reply": True,
-            "enter": False,
+            "enter": enter,
             "unsupport_tips": "当前客户端不支持该按钮",
         },
     }
@@ -154,12 +159,19 @@ def build_panel_keyboard(
     start_btn = build_command_button(
         "major_start", "🚀 开赛", "major 开赛", visited_label="已开赛"
     )
+    start_custom_btn = build_command_button(
+        "major_start_custom",
+        "✏️ 自定义开赛",
+        "major 开赛 ",
+        visited_label="已开赛",
+        enter=True,
+    )
 
     if registration_open:
         rows.append({"buttons": [signup, leave, players]})
         rows.append({"buttons": [bracket_btn, image_btn, history_btn, help_btn]})
         if is_admin:
-            rows.append({"buttons": [start_btn, reset_btn]})
+            rows.append({"buttons": [start_btn, start_custom_btn, reset_btn]})
     else:
         rows.append({"buttons": [players, bracket_btn, image_btn]})
         if is_admin:

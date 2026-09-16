@@ -71,7 +71,7 @@
   .bracket {
     display: flex; gap: 22px; align-items: stretch;
     width: {{ 320 + (rounds | length) * 300 }}px;
-    height: {{ [1180, (rounds[0].matches | length) * 92] | max }}px;
+    height: {{ [1180, (rounds[0].matches | length) * 100] | max }}px;
   }
   .round { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
   .round-title {
@@ -107,6 +107,14 @@
     border: 1px solid var(--line); border-radius: 6px;
     font-size: 11.5px; color: var(--muted); font-weight: 700;
   }
+  .avatar {
+    flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+    background: #1b2740; border: 1px solid var(--line);
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .avatar .initial { font-size: 13px; font-weight: 800; color: var(--muted); }
+  .side.win .avatar { border-color: rgba(70, 224, 164, 0.6); box-shadow: 0 0 0 1px rgba(70,224,164,.25); }
   .pname { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pscore {
     flex: 0 0 auto; min-width: 20px; text-align: right;
@@ -125,7 +133,14 @@
     background: linear-gradient(180deg, rgba(242,193,78,.16), rgba(242,193,78,.04));
     padding: 20px 16px; text-align: center;
   }
-  .champion-box .crown { font-size: 30px; }
+  .champion-box .crown { font-size: 22px; }
+  .champion-avatar {
+    width: 68px; height: 68px; margin: 0 auto 8px; border-radius: 50%;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+    background: #1b2740; border: 2px solid var(--gold-soft);
+    font-size: 26px; font-weight: 900; color: var(--gold);
+  }
+  .champion-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .champion-box .who { margin-top: 8px; font-size: 20px; font-weight: 900; color: var(--gold); }
   .champion-box .seed { margin-top: 4px; font-size: 12px; color: var(--muted); }
   .champion-box.pending { border-style: dashed; border-color: var(--line); background: rgba(16,24,41,.6); }
@@ -165,11 +180,13 @@
         <div class="slot">
           <div class="match {{ 'finished' if m.finished else ('ready' if m.ready else '') }}">
             <div class="side {{ 'win' if m.p1.winner else '' }} {{ 'empty' if m.p1.empty else '' }}">
+              <span class="avatar">{% if m.p1.avatar %}<img src="{{ m.p1.avatar }}" alt="">{% else %}<span class="initial">{{ m.p1.initial }}</span>{% endif %}</span>
               <span class="tag">{{ m.p1.seed if m.p1.seed else '·' }}</span>
               <span class="pname">{{ m.p1.name }}</span>
               <span class="pscore">{{ m.score1 }}</span>
             </div>
             <div class="side {{ 'win' if m.p2.winner else '' }} {{ 'empty' if m.p2.empty else '' }}">
+              <span class="avatar">{% if m.p2.avatar %}<img src="{{ m.p2.avatar }}" alt="">{% else %}<span class="initial">{{ m.p2.initial }}</span>{% endif %}</span>
               <span class="tag">{{ m.p2.seed if m.p2.seed else '·' }}</span>
               <span class="pname">{{ m.p2.name }}</span>
               <span class="pscore">{{ m.score2 }}</span>
@@ -188,6 +205,7 @@
         <div class="slot">
           {% if champion %}
           <div class="champion-box">
+            <div class="champion-avatar">{% if champion.avatar %}<img src="{{ champion.avatar }}" alt="">{% else %}{{ champion.initial }}{% endif %}</div>
             <div class="crown">👑</div>
             <div class="who">{{ champion.name }}</div>
             {% if champion.seed %}<div class="seed">种子 #{{ champion.seed }}</div>{% endif %}

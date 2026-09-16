@@ -36,18 +36,27 @@ class BracketRenderer:
         )
 
     # ────────── HTML ──────────
-    def render_html(self, tournament: Tournament, theme: str = "major") -> str:
+    def render_html(
+        self,
+        tournament: Tournament,
+        theme: str = "major",
+        avatar_map: dict[str, str] | None = None,
+    ) -> str:
         template = self.env.get_template("major_bracket.html")
-        return template.render(**self.build_context(tournament))
+        return template.render(**self.build_context(tournament, avatar_map=avatar_map))
 
-    def build_context(self, tournament: Tournament) -> dict[str, Any]:
+    def build_context(
+        self,
+        tournament: Tournament,
+        avatar_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         rounds = []
         for round_ in tournament.rounds:
             rounds.append(
                 {
                     "name": round_.name,
                     "matches": [
-                        self._match_context(tournament, match)
+                        self._match_context(tournament, match, avatar_map)
                         for match in round_.matches
                     ],
                 }
@@ -78,6 +87,10 @@ class BracketRenderer:
             champion = {
                 "name": player.name if player else tournament.champion,
                 "seed": player.seed if player else "",
+                "avatar": (avatar_map or {}).get(tournament.champion),
+                "initial": self._initial(
+                    player.name if player else tournament.champion
+                ),
             }
 
         return {
@@ -92,11 +105,16 @@ class BracketRenderer:
             "updated_at": tournament.updated_at,
         }
 
-    def _match_context(self, tournament: Tournament, match: Match) -> dict[str, Any]:
+    def _match_context(
+        self,
+        tournament: Tournament,
+        match: Match,
+        avatar_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": match.match_id,
-            "p1": self._side_context(tournament, match, match.p1),
-            "p2": self._side_context(tournament, match, match.p2),
+            "p1": self._side_context(tournament, match, match.p1, avatar_map),
+            "p2": self._side_context(tournament, match, match.p2, avatar_map),
             "score1": "" if match.score1 is None else match.score1,
             "score2": "" if match.score2 is None else match.score2,
             "state": match.status,
@@ -105,17 +123,35 @@ class BracketRenderer:
         }
 
     @staticmethod
+    def _initial(name: str | None) -> str:
+        text = str(name or "").strip()
+        return text[:1] if text else "?"
+
     def _side_context(
-        tournament: Tournament, match: Match, user_id: str | None
+        self,
+        tournament: Tournament,
+        match: Match,
+        user_id: str | None,
+        avatar_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if not user_id:
-            return {"name": "待定", "seed": "", "empty": True, "winner": False}
+            return {
+                "name": "待定",
+                "seed": "",
+                "empty": True,
+                "winner": False,
+                "avatar": None,
+                "initial": "?",
+            }
         player = tournament.get_player(user_id)
+        name = player.name if player else str(user_id)
         return {
-            "name": player.name if player else str(user_id),
+            "name": name,
             "seed": player.seed if player else "",
             "empty": False,
             "winner": match.winner == user_id,
+            "avatar": (avatar_map or {}).get(user_id),
+            "initial": self._initial(name),
         }
 
     # ────────── 纯文本 ──────────

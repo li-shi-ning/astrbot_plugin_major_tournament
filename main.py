@@ -20,6 +20,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
+from .core.avatars import AvatarFetcher, build_avatar_url
 from .core.bracket import (
     MAX_SIZE,
     VALID_SIZES,
@@ -123,7 +124,15 @@ class MajorTournament(Star):
         self.config = config
         self.data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self.store = TournamentDatabase(self.data_dir / "major.db")
+        self.avatar_fetcher = AvatarFetcher()
         self.renderer = BracketRenderer(Path(__file__).parent / "templates")
+
+    async def terminate(self) -> None:
+        """插件卸载时释放头像下载会话。"""
+        try:
+            await self.avatar_fetcher.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[Major] 关闭头像会话失败: {exc}")
 
     # ────────────────────────── 工具方法 ──────────────────────────
     @staticmethod
@@ -197,7 +206,7 @@ class MajorTournament(Star):
             "  major 退赛            取消报名\n"
             "  major 名单            查看报名名单\n"
             "【开赛 / 查看】\n"
-            "  major 开赛 [规模] [名称] 开赛；不填规模按人数自动确定\n"
+            "  major 开赛 [名称] [规模] 开赛（规模可选，放最后）\n"
             "  major 命名 <名称>     修改比赛名称（管理员）\n"
             "  major 重抽            重新随机抽签（开赛后、未有结果前）\n"
             "  major 记录 [数量]     查询最近的比赛结果记录\n"
@@ -627,7 +636,7 @@ class MajorTournament(Star):
             return
 
         try:
-            result = await self._render_bracket_image(tournament)
+            result = await self._render_bracket_image(tournament, event)
         except Exception as exc:  # noqa: BLE001 - 渲染失败时回退文字
             yield event.plain_result(
                 f"❌ 对阵图渲染失败：{exc}\n可先发送「major 对阵」查看文字版。"
@@ -637,9 +646,64 @@ class MajorTournament(Star):
         async for item in self._yield_bracket_image(event, result):
             yield item
 
-    async def _render_bracket_image(self, tournament: Tournament):
+    def _resolve_appid(self, event: AstrMessageEvent) -> str:
+        """解析 QQ 官方机器人的 appid（用于拼头像地址）。"""
+        bot = getattr(event, "bot", None)
+        platform_config = getattr(getattr(bot, "platform", None), "config", None)
+        if isinstance(platform_config, dict) and platform_config.get("appid"):
+            return str(platform_config["appid"]).strip()
+
+        context = getattr(self, "context", None)
+        manager = getattr(context, "platform_manager", None)
+        insts = getattr(manager, "platform_insts", None) or []
+        try:
+            target_id = str(event.get_platform_id() or "")
+        except Exception:  # noqa: BLE001
+            target_id = ""
+
+        fallback = ""
+        for inst in insts:
+            try:
+                meta = inst.meta()
+                inst_id = str(getattr(meta, "id", "") or "")
+            except Exception:  # noqa: BLE001
+                inst_id = ""
+            config = getattr(inst, "config", None)
+            appid = ""
+            if isinstance(config, dict) and config.get("appid"):
+                appid = str(config["appid"]).strip()
+            elif getattr(inst, "appid", None):
+                appid = str(inst.appid).strip()
+            if not appid:
+                continue
+            if target_id and inst_id == target_id:
+                return appid
+            fallback = fallback or appid
+        return fallback
+
+    async def _collect_avatar_map(
+        self, tournament: Tournament, event: AstrMessageEvent
+    ) -> dict[str, str]:
+        """下载所有选手头像，返回 {user_id: data_uri}。"""
+        platform_name = self._platform_name(event)
+        appid = self._resolve_appid(event)
+        user_ids = [player.user_id for player in tournament.players]
+        urls = [build_avatar_url(user_id, platform_name, appid) for user_id in user_ids]
+        if not any(urls):
+            return {}
+        data_uris = await self.avatar_fetcher.fetch_many(urls)
+        return {
+            user_id: data_uri
+            for user_id, data_uri in zip(user_ids, data_uris, strict=False)
+            if data_uri
+        }
+
+    async def _render_bracket_image(
+        self, tournament: Tournament, event: AstrMessageEvent
+    ):
         """调用 AstrBot T2I 渲染对阵图，返回 bytes 或 URL/路径。"""
-        html = self.renderer.render_html(tournament)
+        avatar_map = await self._collect_avatar_map(tournament, event)
+        html = self.renderer.render_html(tournament, avatar_map=avatar_map)
         options = {
             "type": "png",
             "full_page": True,
@@ -729,7 +793,7 @@ class MajorTournament(Star):
             and tournament.status != STATUS_REGISTRATION
         ):
             try:
-                result = await self._render_bracket_image(tournament)
+                result = await self._render_bracket_image(tournament, event)
                 async for item in self._yield_bracket_image(event, result):
                     yield item
             except Exception as exc:  # noqa: BLE001
