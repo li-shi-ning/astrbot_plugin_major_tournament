@@ -961,12 +961,8 @@ class MajorTournament(Star):
         """调用 AstrBot T2I 渲染对阵图，返回 bytes 或 URL/路径。"""
         avatar_map = await self._collect_avatar_map(tournament, event)
         html = self.renderer.render_html(tournament, avatar_map=avatar_map)
-        options = {
-            "type": "png",
-            "full_page": True,
-            "quality": 95,
-            "viewport_width": 360 + max(1, len(tournament.rounds)) * 300 + 200,
-        }
+        # 宽度由 HTML 内容撑开（模板里已做 min-width:max-content），无需额外指定视口
+        options = {"type": "png", "full_page": True, "quality": 95}
         return await self.html_render(html, {}, return_url=False, options=options)
 
     @staticmethod

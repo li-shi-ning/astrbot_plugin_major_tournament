@@ -124,14 +124,22 @@
 
 ## 🖼️ 对阵图渲染说明
 
-渲染链路与 `astrbot_plugin_qq_group_daily_analysis` 一致：
+对阵图参考 **CS:GO Major 淘汰赛对阵树** 的视觉风格：
+
+- 深绿径向渐变底 + 灰绿选手卡，胜者比分格为赛事绿
+- 每列是「晋级到该轮」的选手，逐轮向右收敛，最后一列是冠军（金色）
+- L 形连接线用内联 SVG 精确绘制
+- 选手卡左侧是**圆形头像位**（取不到头像时回退首字母），中间是种子号 + 昵称（超长省略），右侧是该场比分
+- 每列卡片垂直位置严格对齐上游两张卡的中点（标准淘汰树）
+
+渲染链路：
 
 0. `core/avatars.py` 下载选手头像并转成 data URI（官方机器人需要 appid + openid）；
-1. `core/renderer.py` 用 **Jinja2** 把赛事对象渲染成完整 HTML（`templates/major_bracket.html`）；
+1. `core/renderer.py` 计算每列卡片坐标与连接线，用 **Jinja2** 渲染完整 HTML（`templates/major_bracket.html`）；
 2. 调用 AstrBot 的 `self.html_render(html, {}, return_url=False, options=...)`，由 T2I 服务把 HTML 转成图片字节；
 3. 通过 `event.make_result().base64_image(...)` 发送，避免 OneBot / QQ 官方机器人访问不到内部地址。
 
-对阵图列布局使用 flex 等分 + 居中，保证每一轮的比赛卡片正好位于其两个「上游」卡片中点，视觉上形成标准淘汰赛树。
+> 8 人约 1010×600，16 人约 1232×600，32 人约 1482×1892；页面用 `min-width:max-content` 保证超宽时不会被裁切。
 
 ## 🧪 测试
 

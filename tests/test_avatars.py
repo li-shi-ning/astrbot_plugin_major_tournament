@@ -70,8 +70,49 @@ def test_renderer_embeds_avatar_when_provided():
     html = renderer.render_html(tournament, avatar_map={"u0": fake_uri})
 
     assert f'src="{fake_uri}"' in html
-    # 没有头像的选手应回退到首字母
-    assert 'class="initial"' in html
+    assert 'class="logo"' in html
+
+
+def test_bracket_layout_aligns_rounds():
+    """每一列卡片应精确落在上一列两张卡的中点（对阵树对齐）。"""
+    tournament = Tournament(group_id="g", name="杯", size=8)
+    for i in range(8):
+        tournament.add_player(f"u{i}", f"P{i}")
+    start_tournament(tournament, 8, seed_mode="register")
+
+    renderer = BracketRenderer(Path(__file__).resolve().parents[1] / "templates")
+    layout = renderer.build_bracket_layout(tournament)
+    columns = layout["columns"]
+
+    assert [col["name"] for col in columns] == ["8强", "4强", "决赛", "冠军"]
+    assert [len(col["cards"]) for col in columns] == [8, 4, 2, 1]
+    assert layout["connectors"]
+
+    for prev_col, next_col in zip(columns, columns[1:], strict=False):
+        prev_tops = [card["top"] for card in prev_col["cards"]]
+        next_tops = [card["top"] for card in next_col["cards"]]
+        for index, top in enumerate(next_tops):
+            expect = (prev_tops[2 * index] + prev_tops[2 * index + 1]) / 2
+            assert abs(top - expect) < 0.01
+
+
+def test_bracket_layout_for_32_players():
+    tournament = Tournament(group_id="g", name="杯", size=32)
+    for i in range(32):
+        tournament.add_player(f"u{i}", f"P{i}")
+    start_tournament(tournament, 32, seed_mode="register")
+
+    renderer = BracketRenderer(Path(__file__).resolve().parents[1] / "templates")
+    layout = renderer.build_bracket_layout(tournament)
+    assert [len(col["cards"]) for col in layout["columns"]] == [
+        32,
+        16,
+        8,
+        4,
+        2,
+        1,
+    ]
+    assert layout["width"] > 0 and layout["height"] > 0
 
 
 def test_resolve_appid_from_platform_instance():

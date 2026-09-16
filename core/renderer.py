@@ -1,6 +1,9 @@
 """对阵图渲染：把 Tournament 转成 HTML / 文本。
 
 HTML 交给 AstrBot 的 T2I（html_render）转成图片；文本用于群内快速查看。
+
+样式参考 CS:GO Major 淘汰赛对阵树：深绿底、横向选手卡、L 形连接线、
+每列是「晋级到该轮」的选手，最后一列是冠军。
 """
 
 from __future__ import annotations
@@ -21,6 +24,18 @@ from .models import (
     Match,
     Tournament,
 )
+
+# ────────── 对阵图几何参数（px） ──────────
+CARD_W = 196
+CARD_H = 40
+CARD_GAP = 10  # 同一场比赛两张卡之间的间距
+MATCH_STEP = 116  # 第一轮相邻比赛的垂直间距
+COL_GAP = 54  # 相邻两列（卡右缘 -> 下一列卡左缘）的间距
+LEFT_PAD = 18
+TOP_PAD = 40  # 轮次标题下方，第一张卡的位置
+RIGHT_PAD = 18
+BOTTOM_PAD = 22
+LABEL_TOP = 8
 
 
 class BracketRenderer:
@@ -50,18 +65,6 @@ class BracketRenderer:
         tournament: Tournament,
         avatar_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        rounds = []
-        for round_ in tournament.rounds:
-            rounds.append(
-                {
-                    "name": round_.name,
-                    "matches": [
-                        self._match_context(tournament, match, avatar_map)
-                        for match in round_.matches
-                    ],
-                }
-            )
-
         pending = pending_matches(tournament)
         if tournament.status == STATUS_REGISTRATION:
             status_text = f"报名中 {tournament.player_count}/{tournament.size}"
@@ -72,87 +75,223 @@ class BracketRenderer:
         else:
             status_text = str(tournament.status)
 
-        next_hint = ""
-        if pending:
-            first = pending[0]
-            next_hint = (
-                f"{first.match_id}: "
-                f"{tournament.player_name(first.p1)} vs "
-                f"{tournament.player_name(first.p2)}"
-            )
-
-        champion = None
-        if tournament.champion:
-            player = tournament.get_player(tournament.champion)
-            champion = {
-                "name": player.name if player else tournament.champion,
-                "seed": player.seed if player else "",
-                "avatar": (avatar_map or {}).get(tournament.champion),
-                "initial": self._initial(
-                    player.name if player else tournament.champion
-                ),
-            }
-
         return {
             "name": tournament.name or "MAJOR 锦标赛",
-            "size": tournament.size,
             "status_text": status_text,
+            "size": tournament.size,
             "player_count": tournament.player_count,
-            "rounds": rounds,
-            "champion": champion,
-            "next_hint": next_hint,
-            "created_at": tournament.created_at,
             "updated_at": tournament.updated_at,
+            "card_w": CARD_W,
+            "card_h": CARD_H,
+            "b": self.build_bracket_layout(tournament, avatar_map=avatar_map),
         }
 
-    def _match_context(
+    # ────────── 对阵树布局 ──────────
+    def build_bracket_layout(
         self,
         tournament: Tournament,
-        match: Match,
         avatar_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        """计算每一列卡片的位置与连接线，供模板绝对定位使用。
+
+        列 0 = 首轮全部选手（每场两张卡）；列 j = 晋级到第 j 轮的选手；
+        最后一列 = 冠军。相邻列之间用 L 形连线连接。
+        """
+        rounds = tournament.rounds
+        if not rounds:
+            return {
+                "width": 0,
+                "height": 0,
+                "label_top": LABEL_TOP,
+                "columns": [],
+                "connectors": [],
+            }
+
+        col_pitch = CARD_W + COL_GAP
+
+        # 第一列每场比赛两张卡的 top
+        first_matches = len(rounds[0].matches)
+        prev_tops: list[float] = []
+        for i in range(first_matches):
+            base = TOP_PAD + i * MATCH_STEP
+            prev_tops.append(float(base))
+            prev_tops.append(float(base + CARD_H + CARD_GAP))
+
+        columns: list[dict[str, Any]] = []
+
+        def make_column(
+            index: int,
+            name: str,
+            matches: list[Match],
+            tops: list[float],
+            is_champion: bool = False,
+        ) -> dict[str, Any]:
+            cards = []
+            for match_index, match in enumerate(matches):
+                cards.append(
+                    self._bracket_card(
+                        tournament,
+                        match,
+                        match.p1,
+                        top=tops[2 * match_index],
+                        avatar_map=avatar_map,
+                    )
+                )
+                cards.append(
+                    self._bracket_card(
+                        tournament,
+                        match,
+                        match.p2,
+                        top=tops[2 * match_index + 1],
+                        avatar_map=avatar_map,
+                    )
+                )
+            return {
+                "name": name,
+                "x": LEFT_PAD + index * col_pitch,
+                "cards": cards,
+                "is_champion": is_champion,
+            }
+
+        columns.append(make_column(0, rounds[0].name, rounds[0].matches, prev_tops))
+
+        for index in range(1, len(rounds)):
+            # 下一列第 i 张卡对齐上一列第 2i/2i+1 两张卡的中点
+            current_tops = [
+                (prev_tops[2 * i] + prev_tops[2 * i + 1]) / 2
+                for i in range(len(prev_tops) // 2)
+            ]
+            columns.append(
+                make_column(
+                    index, rounds[index].name, rounds[index].matches, current_tops
+                )
+            )
+            prev_tops = current_tops
+
+        # 冠军列
+        champion_top = (prev_tops[0] + prev_tops[1]) / 2
+        champion_card = self._champion_card(tournament, champion_top, avatar_map)
+        columns.append(
+            {
+                "name": "冠军",
+                "x": LEFT_PAD + len(rounds) * col_pitch,
+                "cards": [champion_card],
+                "is_champion": True,
+            }
+        )
+
+        # 连接线
+        connectors: list[str] = []
+        for index in range(len(columns) - 1):
+            x_right = columns[index]["x"] + CARD_W
+            x_mid = x_right + COL_GAP / 2
+            x_next = columns[index + 1]["x"]
+            tops = [card["top"] for card in columns[index]["cards"]]
+            for i in range(len(tops) // 2):
+                y_top = tops[2 * i] + CARD_H / 2
+                y_bot = tops[2 * i + 1] + CARD_H / 2
+                y_mid = (y_top + y_bot) / 2
+                connectors.append(f"M {x_right:g} {y_top:g} H {x_mid:g}")
+                connectors.append(f"M {x_right:g} {y_bot:g} H {x_mid:g}")
+                connectors.append(f"M {x_mid:g} {y_top:g} V {y_bot:g}")
+                connectors.append(f"M {x_mid:g} {y_mid:g} H {x_next:g}")
+
+        max_top = max(
+            (card["top"] for column in columns for card in column["cards"]),
+            default=0.0,
+        )
+        width = columns[-1]["x"] + CARD_W + RIGHT_PAD
+        height = max_top + CARD_H + BOTTOM_PAD
         return {
-            "id": match.match_id,
-            "p1": self._side_context(tournament, match, match.p1, avatar_map),
-            "p2": self._side_context(tournament, match, match.p2, avatar_map),
-            "score1": "" if match.score1 is None else match.score1,
-            "score2": "" if match.score2 is None else match.score2,
-            "state": match.status,
-            "finished": match.status == MATCH_FINISHED,
-            "ready": match.status == MATCH_READY,
+            "width": round(width),
+            "height": round(height),
+            "label_top": LABEL_TOP,
+            "columns": columns,
+            "connectors": connectors,
         }
+
+    def _bracket_card(
+        self,
+        tournament: Tournament,
+        match: Match | None,
+        user_id: str | None,
+        *,
+        top: float,
+        avatar_map: dict[str, str] | None = None,
+        champion: bool = False,
+    ) -> dict[str, Any]:
+        if not user_id:
+            return {
+                "top": top,
+                "empty": True,
+                "name": "待定",
+                "initial": "?",
+                "avatar": None,
+                "seed": "",
+                "score": "",
+                "win": False,
+                "lose": False,
+                "champion": False,
+            }
+
+        player = tournament.get_player(user_id)
+        name = player.name if player else str(user_id)
+        score = ""
+        win = lose = False
+        if match is not None and match.winner:
+            win = match.winner == user_id
+            lose = not win
+            raw = match.score1 if match.p1 == user_id else match.score2
+            score = "" if raw is None else str(raw)
+        if champion:
+            # 冠军用独立的金色样式，不叠加胜负样式
+            win = lose = False
+
+        return {
+            "top": top,
+            "empty": False,
+            "name": name,
+            "initial": self._initial(name),
+            "avatar": (avatar_map or {}).get(user_id),
+            "seed": player.seed if player and player.seed else "",
+            "score": score,
+            "win": win,
+            "lose": lose,
+            "champion": champion,
+        }
+
+    def _champion_card(
+        self,
+        tournament: Tournament,
+        top: float,
+        avatar_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if not tournament.champion:
+            return {
+                "top": top,
+                "empty": True,
+                "name": "虚位以待",
+                "initial": "?",
+                "avatar": None,
+                "seed": "",
+                "score": "",
+                "win": False,
+                "lose": False,
+                "champion": False,
+            }
+        return self._bracket_card(
+            tournament,
+            None,
+            tournament.champion,
+            top=top,
+            avatar_map=avatar_map,
+            champion=True,
+        )
 
     @staticmethod
     def _initial(name: str | None) -> str:
         text = str(name or "").strip()
         return text[:1] if text else "?"
-
-    def _side_context(
-        self,
-        tournament: Tournament,
-        match: Match,
-        user_id: str | None,
-        avatar_map: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        if not user_id:
-            return {
-                "name": "待定",
-                "seed": "",
-                "empty": True,
-                "winner": False,
-                "avatar": None,
-                "initial": "?",
-            }
-        player = tournament.get_player(user_id)
-        name = player.name if player else str(user_id)
-        return {
-            "name": name,
-            "seed": player.seed if player else "",
-            "empty": False,
-            "winner": match.winner == user_id,
-            "avatar": (avatar_map or {}).get(user_id),
-            "initial": self._initial(name),
-        }
 
     # ────────── 纯文本 ──────────
     def render_text(self, tournament: Tournament) -> str:
@@ -160,7 +299,11 @@ class BracketRenderer:
         title = tournament.name or "MAJOR 锦标赛"
         lines.append(f"🏆 {title} · {tournament.size}强单败淘汰赛")
         if tournament.status == STATUS_REGISTRATION:
-            lines.append(f"状态：报名中（{tournament.player_count}/{tournament.size}）")
+            if tournament.size > 0:
+                progress = f"{tournament.player_count}/{tournament.size}"
+            else:
+                progress = f"{tournament.player_count} 人（规模开赛时自动确定）"
+            lines.append(f"状态：报名中（{progress}）")
             for index, player in enumerate(tournament.players, start=1):
                 lines.append(f"  {index}. {player.name}")
             lines.append("报名完成后请管理员发送「major 开赛」。")
