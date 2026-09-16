@@ -75,6 +75,9 @@ class BracketRenderer:
         else:
             status_text = str(tournament.status)
 
+        layout = self.build_bracket_layout(tournament, avatar_map=avatar_map)
+        # T2I 默认视口 1280x720，内容更小时会留大片空白；
+        # 这里按内容给一个「不大于实际内容」的视口，full_page 再撑到真实尺寸。
         return {
             "name": tournament.name or "MAJOR 锦标赛",
             "status_text": status_text,
@@ -83,7 +86,9 @@ class BracketRenderer:
             "updated_at": tournament.updated_at,
             "card_w": CARD_W,
             "card_h": CARD_H,
-            "b": self.build_bracket_layout(tournament, avatar_map=avatar_map),
+            "viewport_w": layout["width"] + 32,
+            "viewport_h": layout["height"] + 100,
+            "b": layout,
         }
 
     # ────────── 对阵树布局 ──────────

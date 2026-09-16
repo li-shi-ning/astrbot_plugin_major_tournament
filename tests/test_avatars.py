@@ -128,3 +128,22 @@ def test_resolve_appid_from_platform_instance():
     )
     event = SimpleNamespace(get_platform_id=lambda: "default_123")
     assert plugin._resolve_appid(event) == "123456"
+
+
+def test_viewport_fits_content_to_avoid_blank():
+    """视口应贴合内容，避免 T2I 默认 1280x720 留下大片空白。"""
+    tournament = Tournament(group_id="g", name="杯", size=8)
+    for i in range(8):
+        tournament.add_player(f"u{i}", f"P{i}")
+    start_tournament(tournament, 8, seed_mode="register")
+
+    renderer = BracketRenderer(Path(__file__).resolve().parents[1] / "templates")
+    context = renderer.build_context(tournament)
+    layout = context["b"]
+
+    assert context["viewport_w"] == layout["width"] + 32
+    assert context["viewport_h"] == layout["height"] + 100
+
+    html = renderer.render_html(tournament)
+    assert f"width={context['viewport_w']}" in html
+    assert f"height={context['viewport_h']}" in html
