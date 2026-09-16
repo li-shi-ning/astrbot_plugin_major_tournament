@@ -5,6 +5,7 @@
 - 管理员人工判定每场胜负
 - 自动生成 32/16/8/4/2 强单败淘汰赛程（标准种子排位 + 轮空晋级）
 - 参考 T2I 方案渲染 Major 风格对阵图
+- QQ 官方机器人支持按钮面板（报名 / 退赛 / 名单 / 赛程 / 判胜等）
 
 命令统一入口：major（别名：锦标赛 / major赛 / major比赛）
 """
@@ -15,7 +16,7 @@ import base64
 import re
 from pathlib import Path
 
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
@@ -31,6 +32,12 @@ from .core.models import (
     STATUS_REGISTRATION,
     STATUS_RUNNING,
     Tournament,
+)
+from .core.qq_official_buttons import (
+    add_passive_reply_context,
+    build_panel_payload,
+    extract_message_reference_id,
+    is_qq_official_platform,
 )
 from .core.renderer import BracketRenderer
 from .core.store import TournamentStore
@@ -171,7 +178,7 @@ class MajorTournament(Star):
 
     # ────────────────────────── 主命令 ──────────────────────────
     @filter.command("major", alias={"锦标赛", "major赛", "major比赛", "major锦标赛"})
-    async def major(self, event: AstrMessageEvent, *_):
+    async def major(self, event: AstrMessageEvent):
         """Major 赛制锦标赛主命令。"""
         event.should_call_llm(True)  # 阻止 LLM 重复回复
 
@@ -179,7 +186,14 @@ class MajorTournament(Star):
         action = _normalize_action(tokens[0]) if tokens else ""
         args = tokens[1:]
 
-        if not action or action in {"帮助", "help"}:
+        if not action:
+            # QQ 官方机器人：优先发按钮面板；其它平台回退文字帮助
+            if await self._send_button_panel(event, self._load_or_new(event)):
+                return
+            yield event.plain_result(self._help_text())
+            return
+
+        if action == "帮助":
             yield event.plain_result(self._help_text())
             return
 
@@ -219,6 +233,95 @@ class MajorTournament(Star):
             yield event.plain_result(
                 f"❓ 未知指令「{tokens[0]}」。发送「major 帮助」查看用法。"
             )
+            return
+
+        # 报名/退赛/开赛/重置/判胜后自动刷新按钮面板
+        if action in {"报名", "退赛", "开赛", "重置", "胜"}:
+            await self._maybe_send_button_panel(event)
+
+    @filter.command("major面板", alias={"major按钮", "major菜单", "major_menu"})
+    async def major_panel(self, event: AstrMessageEvent):
+        """单独发送 Major 按钮面板（QQ 官方机器人）。"""
+        event.should_call_llm(True)
+        group_id = self._group_id(event)
+        if not group_id:
+            yield event.plain_result("❌ 请在群聊中使用按钮面板。")
+            return
+        if not bool(self.config.get("buttons_enabled", True)):
+            yield event.plain_result("ℹ️ 按钮功能已在配置中关闭。")
+            return
+        if not is_qq_official_platform(self._platform_name(event)):
+            yield event.plain_result(
+                "ℹ️ 按钮面板仅支持 QQ 官方机器人；其它平台请发送「major 帮助」。"
+            )
+            return
+        if await self._send_button_panel(event, self._load_or_new(event)):
+            return
+        yield event.plain_result(
+            "❌ 按钮面板发送失败，可发送「major 帮助」查看文字指令。"
+        )
+
+    # ────────────────────────── 按钮面板 ──────────────────────────
+    def _load_or_new(self, event: AstrMessageEvent) -> Tournament:
+        tournament = self._load(event)
+        if tournament is None:
+            tournament = self._new(event)
+        return tournament
+
+    @staticmethod
+    def _platform_name(event: AstrMessageEvent) -> str:
+        getter = getattr(event, "get_platform_name", None)
+        if callable(getter):
+            try:
+                return str(getter() or "")
+            except Exception:  # noqa: BLE001
+                return ""
+        return str(getattr(event, "platform_name", "") or "")
+
+    async def _maybe_send_button_panel(self, event: AstrMessageEvent) -> None:
+        if not bool(self.config.get("button_auto_refresh", True)):
+            return
+        tournament = self._load(event)
+        if tournament is not None:
+            await self._send_button_panel(event, tournament)
+
+    async def _send_button_panel(
+        self, event: AstrMessageEvent, tournament: Tournament
+    ) -> bool:
+        """通过 QQ 官方 API 发送 Markdown + 按钮键盘。成功返回 True。"""
+        if not bool(self.config.get("buttons_enabled", True)):
+            return False
+        if not is_qq_official_platform(self._platform_name(event)):
+            return False
+
+        message_obj = getattr(event, "message_obj", None)
+        raw_message = getattr(message_obj, "raw_message", None)
+        api = getattr(getattr(event, "bot", None), "api", None)
+        if raw_message is None or api is None:
+            return False
+
+        payload = build_panel_payload(tournament, is_admin=event.is_admin())
+        add_passive_reply_context(
+            payload,
+            msg_id=extract_message_reference_id(raw_message, message_obj),
+            msg_seq=getattr(raw_message, "msg_seq", None),
+        )
+        try:
+            group_openid = getattr(raw_message, "group_openid", None)
+            if group_openid:
+                await api.post_group_message(group_openid=group_openid, **payload)
+            else:
+                author = getattr(raw_message, "author", None)
+                user_openid = getattr(author, "user_openid", None)
+                if not user_openid:
+                    return False
+                await api.post_c2c_message(openid=user_openid, **payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Major] 发送按钮面板失败: {exc}")
+            return False
+
+        event.stop_event()
+        return True
 
     # ────────────────────────── 各子命令 ──────────────────────────
     async def _handle_signup(self, event: AstrMessageEvent, args: list[str]):

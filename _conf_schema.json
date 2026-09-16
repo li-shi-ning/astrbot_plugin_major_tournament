@@ -21,6 +21,18 @@
         "type": "bool",
         "default": false,
         "hint": "开启后管理员每判定一场胜负都会自动生成一张对阵图，T2I 渲染有开销，请按需开启。"
+      },
+      "buttons_enabled": {
+        "description": "启用 QQ 官方按钮面板",
+        "type": "bool",
+        "default": true,
+        "hint": "仅对 QQ 官方机器人/Webhook 生效。开启后发送「major」会回复带按钮的 Markdown 面板，报名、判胜等可点击完成。"
+      },
+      "button_auto_refresh": {
+        "description": "操作后自动刷新按钮面板",
+        "type": "bool",
+        "default": true,
+        "hint": "报名/退赛/开赛/判胜/重置后，自动重发最新的按钮面板。"
       }
     }
   }
