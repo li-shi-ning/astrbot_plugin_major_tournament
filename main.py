@@ -608,7 +608,7 @@ class MajorTournament(Star):
         self._save(tournament)
         yield event.plain_result(f"✅ 比赛名称已设置为「{tournament.name}」。")
 
-    RECORDS_PAGE_SIZE = 5
+    RECORDS_PAGE_SIZE = 4
 
     @staticmethod
     def _format_time(raw: str) -> str:

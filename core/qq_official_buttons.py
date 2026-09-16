@@ -279,20 +279,24 @@ def build_records_keyboard(
     page: int,
     total_pages: int,
 ) -> dict[str, Any]:
-    """比赛记录列表键盘：赛事名称按钮 + 上一页/下一页。"""
+    """比赛记录列表键盘：一行一个赛事（最多 4 行）+ 一行上一页/下一页。"""
     rows: list[dict[str, list[dict[str, Any]]]] = []
 
-    buttons = [
-        build_command_button(
-            f"major_record_{entry['n']}",
-            entry.get("label") or f"major#{entry['n']}",
-            f"major 详情 {entry['id']}",
-            visited_label=entry.get("label") or f"major#{entry['n']}",
+    # 一行一个赛事，名称更完整；总行数交给调用方控制在 4 行 + 1 行分页
+    for entry in entries:
+        label = entry.get("label") or f"major#{entry['n']}"
+        rows.append(
+            {
+                "buttons": [
+                    build_command_button(
+                        f"major_record_{entry['n']}",
+                        label,
+                        f"major 详情 {entry['id']}",
+                        visited_label=label,
+                    )
+                ]
+            }
         )
-        for entry in entries
-    ]
-    for offset in range(0, len(buttons), 5):
-        rows.append({"buttons": buttons[offset : offset + 5]})
 
     nav: list[dict[str, Any]] = []
     if page > 1:
