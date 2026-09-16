@@ -143,7 +143,7 @@ def build_panel_keyboard(
     can_manage: bool = False,
     is_admin: bool | None = None,
     room_exists: bool = True,
-    max_winner_rows: int = 2,
+    max_winner_rows: int = 1,
 ) -> dict[str, Any]:
     """按赛事状态生成按钮键盘。
 
@@ -200,15 +200,15 @@ def build_panel_keyboard(
     else:
         rows.append({"buttons": [players, bracket_btn, image_btn]})
         if can_manage:
-            for offset, match in enumerate(
-                pending_matches(tournament)[:max_winner_rows]
-            ):
+            # 只展示「下一场」的判胜按钮，避免按钮数量过多触达平台上限
+            next_matches = pending_matches(tournament)[:max_winner_rows]
+            for offset, match in enumerate(next_matches):
                 rows.append({"buttons": _winner_buttons(tournament, match, offset)})
-            if has_decided_real_match(tournament):
-                rows.append({"buttons": [reset_btn, history_btn, help_btn]})
-            else:
-                rows.append({"buttons": [redraw_btn, reset_btn]})
-                rows.append({"buttons": [history_btn, help_btn]})
+            footer: list[dict[str, Any]] = []
+            if not has_decided_real_match(tournament):
+                footer.append(redraw_btn)
+            footer.extend([reset_btn, history_btn, help_btn])
+            rows.append({"buttons": footer})
         else:
             rows.append({"buttons": [history_btn, help_btn]})
 
@@ -221,7 +221,7 @@ def build_panel_payload(
     can_manage: bool = False,
     is_admin: bool | None = None,
     room_exists: bool = True,
-    max_winner_rows: int = 2,
+    max_winner_rows: int = 1,
 ) -> dict[str, Any]:
     """构造完整的 QQ 官方按钮消息 payload（未包含被动回复上下文）。"""
     return {

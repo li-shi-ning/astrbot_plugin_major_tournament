@@ -329,3 +329,22 @@ def test_records_and_detail_buttons_on_qq_official(tmp_path):
         assert "major 记录" in detail_datas
 
     asyncio.run(scenario())
+
+
+def test_running_panel_only_shows_next_match_buttons():
+    """进行中面板只展示「下一场」的两个判胜按钮，避免按钮数量膨胀。"""
+    t = make_tournament(8)
+    start_tournament(t, size=8, seed_mode="register")
+    pending = pending_matches(t)
+    assert len(pending) > 1
+
+    payload = build_panel_payload(t, can_manage=True)
+    rows = payload["keyboard"]["content"]["rows"]
+    datas = [b["action"]["data"] for row in rows for b in row["buttons"]]
+    win_datas = [d for d in datas if d.startswith("major 胜 ")]
+
+    assert len(win_datas) == 2
+    first = pending[0]
+    assert f"major 胜 {first.match_id} 1" in win_datas
+    assert f"major 胜 {first.match_id} 2" in win_datas
+    assert len(rows) <= 5
