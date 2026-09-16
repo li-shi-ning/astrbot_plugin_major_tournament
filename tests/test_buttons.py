@@ -20,6 +20,7 @@ from astrbot_plugin_major_tournament.core.qq_official_buttons import (  # noqa: 
     add_passive_reply_context,
     build_command_button,
     build_panel_payload,
+    build_records_payload,
     extract_message_reference_id,
     is_qq_official_platform,
 )
@@ -142,9 +143,10 @@ class FakeRawMessage:
 
 
 class FakeQQEvent:
-    def __init__(self, text="", admin=False):
+    def __init__(self, text="", admin=False, uid=None):
         self._text = text
         self._admin = admin
+        self._uid = uid
         self.stopped = False
         self.bot = SimpleNamespace(api=FakeBotApi())
         self.message_obj = SimpleNamespace(
@@ -164,7 +166,7 @@ class FakeQQEvent:
         return "qqplat"
 
     def get_sender_id(self):
-        return "admin" if self._admin else "u1"
+        return self._uid or ("admin" if self._admin else "u1")
 
     def get_sender_name(self):
         return "管理员" if self._admin else "选手1"
@@ -259,3 +261,66 @@ def test_panel_without_room_shows_create_button():
     assert "major 创建房间 " in data
     assert "major 报名" not in data
     assert "还没有创建房间" in payload["markdown"]["content"]
+
+
+async def _run_qq(plugin, text, uid="u1", admin=False):
+    event = FakeQQEvent(text=text, admin=admin, uid=uid)
+    results = [item async for item in plugin.major(event)]
+    return event, results
+
+
+def test_records_pagination_keyboard():
+    entries = [{"n": i, "id": f"id{i}"} for i in range(1, 8)]
+    payload = build_records_payload("rec", entries[:5], page=1, total_pages=2)
+    datas = [
+        b["action"]["data"]
+        for row in payload["keyboard"]["content"]["rows"]
+        for b in row["buttons"]
+    ]
+    assert "major 详情 id1" in datas
+    assert "major 记录 2" in datas  # 下一页
+    assert "major 记录 0" not in datas
+
+    payload2 = build_records_payload("rec", entries[5:], page=2, total_pages=2)
+    datas2 = [
+        b["action"]["data"]
+        for row in payload2["keyboard"]["content"]["rows"]
+        for b in row["buttons"]
+    ]
+    assert "major 详情 id6" in datas2
+    assert "major 记录 1" in datas2  # 上一页
+
+
+def test_records_and_detail_buttons_on_qq_official(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        await _run_qq(plugin, "major 创建房间 记录杯", uid="admin", admin=True)
+        for i in range(1, 5):
+            await _run_qq(plugin, "major 报名", uid=f"u{i}")
+        await _run_qq(plugin, "major 开赛", uid="admin", admin=True)
+
+        event, results = await _run_qq(plugin, "major 记录", uid="u1")
+        assert results == []
+        payload = event.bot.api.calls[-1][1]
+        datas = [
+            b["action"]["data"]
+            for row in payload["keyboard"]["content"]["rows"]
+            for b in row["buttons"]
+        ]
+        tournament = plugin.store.load("group-openid", "qqplat")
+        assert tournament is not None
+        assert f"major 详情 {tournament.tournament_id}" in datas
+
+        detail_event, _ = await _run_qq(
+            plugin, f"major 详情 {tournament.tournament_id}", uid="u1"
+        )
+        detail_datas = [
+            b["action"]["data"]
+            for row in detail_event.bot.api.calls[-1][1]["keyboard"]["content"]["rows"]
+            for b in row["buttons"]
+        ]
+        assert f"major 详情图 {tournament.tournament_id}" in detail_datas
+        assert "major 记录" in detail_datas
+
+    asyncio.run(scenario())

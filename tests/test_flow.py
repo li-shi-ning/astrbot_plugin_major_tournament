@@ -254,11 +254,19 @@ def test_history_command_reads_database(tmp_path):
             ),
         )
 
+        # 记录列表
         results = await _run(plugin, FakeEvent("u1", "选手1", text="major 记录"))
         text = results[0][1]
         assert "比赛记录" in text
-        assert match.match_id in text
-        assert "2:1" in text
+        assert "major#1" in text
+
+        # 详情（用序号 1）
+        detail = await _run(plugin, FakeEvent("u1", "选手1", text="major 详情 1"))
+        detail_text = detail[0][1]
+        assert "参赛人员" in detail_text
+        assert "冠军" in detail_text
+        assert match.match_id in detail_text
+        assert "2:1" in detail_text
 
     asyncio.run(scenario())
 

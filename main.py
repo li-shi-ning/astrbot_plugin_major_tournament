@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import re
 from pathlib import Path
+from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -32,6 +33,8 @@ from .core.bracket import (
 )
 from .core.database import TournamentDatabase
 from .core.models import (
+    MATCH_FINISHED,
+    MATCH_READY,
     STATUS_FINISHED,
     STATUS_REGISTRATION,
     STATUS_RUNNING,
@@ -39,7 +42,9 @@ from .core.models import (
 )
 from .core.qq_official_buttons import (
     add_passive_reply_context,
+    build_detail_payload,
     build_panel_payload,
+    build_records_payload,
     extract_message_reference_id,
     is_qq_official_platform,
 )
@@ -93,6 +98,12 @@ ACTION_ALIASES = {
     "战绩": "记录",
     "历史": "记录",
     "history": "记录",
+    "详情": "详情",
+    "记录详情": "详情",
+    "detail": "详情",
+    "详情图": "详情图",
+    "记录图": "详情图",
+    "detailimage": "详情图",
     "创建房间": "创建房间",
     "建房": "创建房间",
     "创建比赛": "创建房间",
@@ -217,7 +228,7 @@ class MajorTournament(Star):
             "  major 开赛 [名称] [规模] 开赛（规模可选，放最后）\n"
             "  major 命名 <名称>     修改比赛名称（房主/管理员）\n"
             "  major 重抽            重新随机抽签（房主/管理员）\n"
-            "  major 记录 [数量]     查询最近的比赛结果记录\n"
+            "  major 记录 [页码]     比赛记录列表（按钮翻页、查看详情）\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
             "【人工判定】（房主/管理员）\n"
@@ -295,6 +306,12 @@ class MajorTournament(Star):
                 yield item
         elif action == "记录":
             async for item in self._handle_history(event, args):
+                yield item
+        elif action == "详情":
+            async for item in self._handle_record_detail(event, args):
+                yield item
+        elif action == "详情图":
+            async for item in self._handle_record_image(event, args):
                 yield item
         elif action == "重置":
             async for item in self._handle_reset(event):
@@ -386,6 +403,17 @@ class MajorTournament(Star):
     async def _send_button_panel(
         self, event: AstrMessageEvent, tournament: Tournament, room_exists: bool = True
     ) -> bool:
+        """发送赛事面板（Markdown + 按钮键盘）。"""
+        payload = build_panel_payload(
+            tournament,
+            can_manage=self._ensure_host(event, tournament),
+            room_exists=room_exists,
+        )
+        return await self._send_markdown_keyboard(event, payload)
+
+    async def _send_markdown_keyboard(
+        self, event: AstrMessageEvent, payload: dict[str, Any]
+    ) -> bool:
         """通过 QQ 官方 API 发送 Markdown + 按钮键盘。成功返回 True。"""
         if not bool(self.config.get("buttons_enabled", True)):
             return False
@@ -398,11 +426,6 @@ class MajorTournament(Star):
         if raw_message is None or api is None:
             return False
 
-        payload = build_panel_payload(
-            tournament,
-            can_manage=self._ensure_host(event, tournament),
-            room_exists=room_exists,
-        )
         add_passive_reply_context(
             payload,
             msg_id=extract_message_reference_id(raw_message, message_obj),
@@ -419,7 +442,7 @@ class MajorTournament(Star):
                     return False
                 await api.post_c2c_message(openid=user_openid, **payload)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"[Major] 发送按钮面板失败: {exc}")
+            logger.warning(f"[Major] 发送按钮消息失败: {exc}")
             return False
 
         event.stop_event()
@@ -585,32 +608,158 @@ class MajorTournament(Star):
         self._save(tournament)
         yield event.plain_result(f"✅ 比赛名称已设置为「{tournament.name}」。")
 
-    async def _handle_history(self, event: AstrMessageEvent, args: list[str]):
-        """从数据库查询最近的比赛结果。"""
-        limit = 10
-        for arg in args:
-            if arg.isdigit():
-                limit = min(50, max(1, int(arg)))
-                break
+    RECORDS_PAGE_SIZE = 5
 
-        rows = self.store.recent_history(
-            self._group_id(event), self._platform_id(event), limit
-        )
-        if not rows:
+    @staticmethod
+    def _format_time(raw: str) -> str:
+        text = str(raw or "")
+        try:
+            from datetime import datetime
+
+            return datetime.fromisoformat(text).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            return text[:16]
+
+    @staticmethod
+    def _record_status_text(status: str) -> str:
+        return {
+            STATUS_REGISTRATION: "报名中",
+            STATUS_RUNNING: "进行中",
+            STATUS_FINISHED: "已结束",
+        }.get(status, str(status))
+
+    async def _handle_history(self, event: AstrMessageEvent, args: list[str]):
+        """比赛记录：按钮列表 + 分页。"""
+        group_id = self._group_id(event)
+        platform_id = self._platform_id(event)
+        total = self.store.count_tournaments(group_id, platform_id)
+        if total <= 0:
             yield event.plain_result("ℹ️ 暂无比赛记录。")
             return
 
-        lines = [f"📜 最近 {len(rows)} 场比赛记录："]
-        for row in rows:
-            score = ""
-            if row.get("score1") is not None or row.get("score2") is not None:
-                score = f"（{row.get('score1') or 0}:{row.get('score2') or 0}）"
+        page_size = self.RECORDS_PAGE_SIZE
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = 1
+        for arg in args:
+            if arg.isdigit():
+                page = int(arg)
+                break
+        page = min(max(1, page), total_pages)
+        offset = (page - 1) * page_size
+
+        rows = self.store.list_tournaments(
+            group_id, platform_id, limit=page_size, offset=offset
+        )
+        entries: list[dict[str, Any]] = []
+        lines = [f"📜 比赛记录（第 {page}/{total_pages} 页 · 共 {total} 场）"]
+        for index, row in enumerate(rows):
+            number = offset + index + 1
+            entries.append({"n": number, "id": row["tournament_id"]})
+            name = row["name"] or f"major#{number}"
+            champion = row.get("champion_name") or ""
+            suffix = f" · 冠军 {champion}" if champion else ""
             lines.append(
-                f"  [{row.get('round_name')}] {row.get('match_id')} "
-                f"{row.get('winner_name')} 胜 {row.get('loser_name')}{score}"
+                f"major#{number} {name} · "
+                f"{self._record_status_text(row['status'])} · "
+                f"{row['player_count']}人{suffix}"
             )
-        lines.append("完整赛程与结果保存在插件数据库 major.db。")
-        yield event.plain_result("\n".join(lines))
+        lines.append("点下方按钮查看详情")
+        text = "\n".join(lines)
+
+        payload = build_records_payload(
+            text, entries, page=page, total_pages=total_pages
+        )
+        if await self._send_markdown_keyboard(event, payload):
+            return
+        yield event.plain_result(text)
+
+    def _resolve_record(self, event: AstrMessageEvent, key: str) -> Tournament | None:
+        """按钮给的是 tournament_id；文字里也可以用 1-based 序号。"""
+        text = str(key or "").strip()
+        group_id = self._group_id(event)
+        platform_id = self._platform_id(event)
+        if text.isdigit() and len(text) <= 4:
+            return self.store.tournament_at_rank(group_id, platform_id, int(text))
+        return self.store.load_by_id(text)
+
+    def _format_record_detail(self, tournament: Tournament, rank: int) -> str:
+        prefix = f"major#{rank}" if rank > 0 else "major#?"
+        title = tournament.name or "MAJOR 锦标赛"
+        lines = [
+            f"🏆 {prefix} · {title}",
+            f"状态：{self._record_status_text(tournament.status)}",
+            f"创建：{self._format_time(tournament.created_at)}",
+            f"参赛人员（{tournament.player_count}）："
+            + "、".join(player.name for player in tournament.players),
+            f"冠军：{tournament.player_name(tournament.champion) if tournament.champion else '—'}",
+            "",
+            "比赛赛程：",
+        ]
+        if not tournament.rounds:
+            lines.append("  （尚未开赛）")
+        for round_ in tournament.rounds:
+            for match in round_.matches:
+                p1 = tournament.player_name(match.p1)
+                p2 = tournament.player_name(match.p2)
+                if match.status == MATCH_FINISHED and match.p1 and match.p2:
+                    score = ""
+                    if match.score1 is not None or match.score2 is not None:
+                        score = f" {match.score1 or 0}:{match.score2 or 0} "
+                    else:
+                        score = " "
+                    lines.append(
+                        f"  [{round_.name}] {match.match_id} {p1}{score}{p2}"
+                        f"  → {tournament.player_name(match.winner)}"
+                    )
+                elif match.status == MATCH_FINISHED:
+                    lines.append(
+                        f"  [{round_.name}] {match.match_id} "
+                        f"{tournament.player_name(match.winner)}（轮空晋级）"
+                    )
+                elif match.status == MATCH_READY:
+                    lines.append(
+                        f"  [{round_.name}] {match.match_id} {p1} vs {p2}（待判定）"
+                    )
+                else:
+                    lines.append(f"  [{round_.name}] {match.match_id} {p1} vs {p2}")
+        text = "\n".join(lines)
+        if len(text) > 1800:
+            text = text[:1800] + "\n…（内容过长已截断）"
+        return text
+
+    async def _handle_record_detail(self, event: AstrMessageEvent, args: list[str]):
+        key = args[0] if args else ""
+        tournament = self._resolve_record(event, key)
+        if tournament is None:
+            yield event.plain_result("❌ 找不到该记录，请重新「major 记录」查看列表。")
+            return
+        rank = self.store.rank_of(
+            tournament.tournament_id, self._group_id(event), self._platform_id(event)
+        )
+        text = self._format_record_detail(tournament, rank)
+        payload = build_detail_payload(text, tournament.tournament_id)
+        if await self._send_markdown_keyboard(event, payload):
+            return
+        yield event.plain_result(
+            text + f"\n\n发送「major 详情图 {tournament.tournament_id}」查看对阵图。"
+        )
+
+    async def _handle_record_image(self, event: AstrMessageEvent, args: list[str]):
+        key = args[0] if args else ""
+        tournament = self._resolve_record(event, key)
+        if tournament is None:
+            yield event.plain_result("❌ 找不到该记录。")
+            return
+        if not tournament.rounds:
+            yield event.plain_result("❌ 该记录还没有赛程（未开赛）。")
+            return
+        try:
+            result = await self._render_bracket_image(tournament, event)
+        except Exception as exc:  # noqa: BLE001
+            yield event.plain_result(f"❌ 对阵图渲染失败：{exc}")
+            return
+        async for item in self._yield_bracket_image(event, result):
+            yield item
 
     async def _handle_add(self, event: AstrMessageEvent, args: list[str]):
         tournament = self._load(event)

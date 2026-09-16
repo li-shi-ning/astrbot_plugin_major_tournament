@@ -268,3 +268,94 @@ def extract_message_reference_id(raw_message: Any, message_obj: Any) -> str | No
         if text:
             return text
     return None
+
+
+# ────────────────────── 比赛记录（列表 / 详情） ──────────────────────
+
+
+def build_records_keyboard(
+    entries: list[dict[str, Any]],
+    *,
+    page: int,
+    total_pages: int,
+) -> dict[str, Any]:
+    """比赛记录列表键盘：major#N 按钮 + 上一页/下一页。"""
+    rows: list[dict[str, list[dict[str, Any]]]] = []
+
+    buttons = [
+        build_command_button(
+            f"major_record_{entry['n']}",
+            f"major#{entry['n']}",
+            f"major 详情 {entry['id']}",
+            visited_label=f"major#{entry['n']}",
+        )
+        for entry in entries
+    ]
+    for offset in range(0, len(buttons), 5):
+        rows.append({"buttons": buttons[offset : offset + 5]})
+
+    nav: list[dict[str, Any]] = []
+    if page > 1:
+        nav.append(
+            build_command_button(
+                "major_record_prev", "⬅ 上一页", f"major 记录 {page - 1}"
+            )
+        )
+    if page < total_pages:
+        nav.append(
+            build_command_button(
+                "major_record_next", "➡ 下一页", f"major 记录 {page + 1}"
+            )
+        )
+    if nav:
+        rows.append({"buttons": nav})
+
+    return {"content": {"rows": rows[:MAX_ROWS]}}
+
+
+def build_records_payload(
+    markdown_text: str,
+    entries: list[dict[str, Any]],
+    *,
+    page: int,
+    total_pages: int,
+) -> dict[str, Any]:
+    return {
+        "msg_type": 2,
+        "markdown": {"content": markdown_text},
+        "keyboard": build_records_keyboard(entries, page=page, total_pages=total_pages),
+    }
+
+
+def build_detail_keyboard(tournament_id: str) -> dict[str, Any]:
+    """记录详情键盘：查看图像 / 返回列表。"""
+    return {
+        "content": {
+            "rows": [
+                {
+                    "buttons": [
+                        build_command_button(
+                            "major_detail_image",
+                            "🖼 查看图像",
+                            f"major 详情图 {tournament_id}",
+                        )
+                    ]
+                },
+                {
+                    "buttons": [
+                        build_command_button(
+                            "major_detail_back", "⬅ 返回列表", "major 记录"
+                        )
+                    ]
+                },
+            ]
+        }
+    }
+
+
+def build_detail_payload(markdown_text: str, tournament_id: str) -> dict[str, Any]:
+    return {
+        "msg_type": 2,
+        "markdown": {"content": markdown_text},
+        "keyboard": build_detail_keyboard(tournament_id),
+    }

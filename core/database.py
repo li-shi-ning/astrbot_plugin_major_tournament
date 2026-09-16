@@ -131,44 +131,131 @@ class TournamentDatabase:
                 """,
                 (str(group_id), str(platform_id)),
             ).fetchone()
-            if row is None:
-                return None
+            return self._row_to_tournament(row) if row is not None else None
 
-            tournament = Tournament(
-                group_id=row["group_id"],
-                platform_id=row["platform_id"],
-                name=row["name"],
-                size=int(row["size"]),
-                status=row["status"],
-                champion=row["champion"],
-                creator_id=row["creator_id"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                tournament_id=row["tournament_id"],
-            )
+    def load_by_id(self, tournament_id: str) -> Tournament | None:
+        """按 tournament_id 读取任意一场赛事（包含已结束/已重置的历史赛事）。"""
+        tid = str(tournament_id or "").strip()
+        if not tid:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM tournaments WHERE tournament_id = ?", (tid,)
+            ).fetchone()
+            return self._row_to_tournament(row) if row is not None else None
 
-            player_rows = self._conn.execute(
-                "SELECT user_id, name, seed FROM players WHERE tournament_id = ?",
-                (tournament.tournament_id,),
-            ).fetchall()
-            tournament.players = [
-                Player(
-                    user_id=item["user_id"],
-                    name=item["name"],
-                    seed=int(item["seed"]),
-                )
-                for item in player_rows
-            ]
-
-            match_rows = self._conn.execute(
+    def count_tournaments(self, group_id: str, platform_id: str = "") -> int:
+        with self._lock:
+            row = self._conn.execute(
                 """
-                SELECT * FROM matches WHERE tournament_id = ?
-                ORDER BY round_index ASC, slot_index ASC
+                SELECT COUNT(*) AS total FROM tournaments
+                WHERE group_id = ? AND platform_id = ?
                 """,
-                (tournament.tournament_id,),
+                (str(group_id), str(platform_id)),
+            ).fetchone()
+        return int(row["total"]) if row else 0
+
+    def list_tournaments(
+        self,
+        group_id: str,
+        platform_id: str = "",
+        limit: int = 5,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """按时间倒序列出该群的赛事（含已结束的）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    t.tournament_id, t.name, t.size, t.status, t.champion,
+                    t.creator_id, t.created_at, t.updated_at, t.active,
+                    (SELECT COUNT(*) FROM players p
+                     WHERE p.tournament_id = t.tournament_id) AS player_count,
+                    (SELECT p.name FROM players p
+                     WHERE p.tournament_id = t.tournament_id
+                       AND p.user_id = t.champion LIMIT 1) AS champion_name
+                FROM tournaments t
+                WHERE t.group_id = ? AND t.platform_id = ?
+                ORDER BY t.created_at DESC, t.rowid DESC
+                LIMIT ? OFFSET ?
+                """,
+                (
+                    str(group_id),
+                    str(platform_id),
+                    max(1, int(limit)),
+                    max(0, int(offset)),
+                ),
             ).fetchall()
-            tournament.rounds = self._rebuild_rounds(match_rows, tournament.players)
-            return tournament
+        return [dict(row) for row in rows]
+
+    def rank_of(self, tournament_id: str, group_id: str, platform_id: str = "") -> int:
+        """返回该赛事在列表中的序号（1-based，最近的一场为 1）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT tournament_id FROM tournaments
+                WHERE group_id = ? AND platform_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                """,
+                (str(group_id), str(platform_id)),
+            ).fetchall()
+        ids = [row["tournament_id"] for row in rows]
+        tid = str(tournament_id or "")
+        return ids.index(tid) + 1 if tid in ids else 0
+
+    def tournament_at_rank(
+        self, group_id: str, platform_id: str, rank: int
+    ) -> Tournament | None:
+        """按 1-based 序号读取赛事。"""
+        index = max(0, int(rank) - 1)
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM tournaments
+                WHERE group_id = ? AND platform_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT 1 OFFSET ?
+                """,
+                (str(group_id), str(platform_id), index),
+            ).fetchone()
+            return self._row_to_tournament(row) if row is not None else None
+
+    def _row_to_tournament(self, row: sqlite3.Row) -> Tournament:
+        tournament = Tournament(
+            group_id=row["group_id"],
+            platform_id=row["platform_id"],
+            name=row["name"],
+            size=int(row["size"]),
+            status=row["status"],
+            champion=row["champion"],
+            creator_id=row["creator_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            tournament_id=row["tournament_id"],
+        )
+
+        player_rows = self._conn.execute(
+            "SELECT user_id, name, seed FROM players WHERE tournament_id = ?",
+            (tournament.tournament_id,),
+        ).fetchall()
+        tournament.players = [
+            Player(
+                user_id=item["user_id"],
+                name=item["name"],
+                seed=int(item["seed"]),
+            )
+            for item in player_rows
+        ]
+
+        match_rows = self._conn.execute(
+            """
+            SELECT * FROM matches WHERE tournament_id = ?
+            ORDER BY round_index ASC, slot_index ASC
+            """,
+            (tournament.tournament_id,),
+        ).fetchall()
+        tournament.rounds = self._rebuild_rounds(match_rows, tournament.players)
+        return tournament
 
     @staticmethod
     def _rebuild_rounds(
