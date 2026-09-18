@@ -399,6 +399,9 @@ class MajorTournament(Star):
         tournament = self._load(event)
         if tournament is not None:
             await self._send_button_panel(event, tournament)
+            return
+        # 本局已结束/归档：直接给「创建房间」面板，方便开下一局
+        await self._send_button_panel(event, self._new(event), room_exists=False)
 
     async def _send_button_panel(
         self, event: AstrMessageEvent, tournament: Tournament, room_exists: bool = True
@@ -452,10 +455,14 @@ class MajorTournament(Star):
     async def _handle_create_room(self, event: AstrMessageEvent, args: list[str]):
         existing = self._load(event)
         if existing is not None:
-            yield event.plain_result(
-                "❌ 当前已有房间，如需重建请先「major 重置」（房主/管理员）。"
-            )
-            return
+            if existing.status == STATUS_FINISHED:
+                # 兼容历史数据：已结束但还没归档的赛事，直接归档后开新房
+                self.store.delete(self._group_id(event), self._platform_id(event))
+            else:
+                yield event.plain_result(
+                    "❌ 当前已有房间，如需重建请先「major 重置」（房主/管理员）。"
+                )
+                return
 
         size = None
         name_parts: list[str] = []
@@ -1087,7 +1094,16 @@ class MajorTournament(Star):
             yield event.plain_result(f"❌ {message}")
             return
         self._save(tournament)
-        yield event.plain_result(f"✅ {message}")
+        if tournament.status == STATUS_FINISHED:
+            # 冠军已产生：自动归档本局，方便直接开下一局（战绩仍保留在数据库里）
+            self.store.delete(self._group_id(event), self._platform_id(event))
+            yield event.plain_result(
+                f"✅ {message}\n"
+                "🏁 本局已结束并自动归档，可直接「major 创建房间」开启下一局；"
+                "历史战绩用「major 记录」查看。"
+            )
+        else:
+            yield event.plain_result(f"✅ {message}")
 
         if (
             bool(self.config.get("auto_render", False))

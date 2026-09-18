@@ -112,10 +112,13 @@ def test_full_tournament_flow(tmp_path):
         assert tournament.size == 8
         assert [r.name for r in tournament.rounds] == ["8强", "4强", "决赛"]
 
-        # 3. 逐场判胜，直到产生冠军
+        # 3. 逐场判胜，直到产生冠军（冠军产生后会自动归档）
         guard = 0
-        while tournament.status != "finished" and guard < 20:
+        while guard < 20:
             guard += 1
+            tournament = plugin.store.load("g1", "testplat")
+            if tournament is None:  # 已自动归档 = 本局结束
+                break
             matches = pending_matches(tournament)
             assert matches, "进行中应始终有可判定的比赛"
             match = matches[0]
@@ -129,10 +132,78 @@ def test_full_tournament_flow(tmp_path):
                 ),
             )
             assert results[0][1].startswith("✅") or "冠军" in results[0][1]
-            tournament = plugin.store.load("g1", "testplat")
+        else:
+            raise AssertionError("未能在预期步数内结束比赛")
 
-        assert tournament.status == "finished"
-        assert tournament.champion
+        # 当前赛事已归档，但战绩保留在数据库里
+        assert plugin.store.load("g1", "testplat") is None
+        records = plugin.store.list_tournaments("g1", "testplat", limit=1)
+        assert records and records[0]["champion"]
+
+    asyncio.run(scenario())
+
+
+def test_champion_auto_archives_and_can_start_next(tmp_path):
+    """打完一整局后自动归档，无需手动重置就能开下一局。"""
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        await _create_room(plugin, uid="u1", name="房主", admin=False, args="首局杯 4")
+        for i in range(1, 5):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(plugin, FakeEvent("u1", "房主", admin=False, text="major 开赛"))
+
+        guard = 0
+        while guard < 20 and plugin.store.load("g1", "testplat") is not None:
+            guard += 1
+            tournament = plugin.store.load("g1", "testplat")
+            matches = pending_matches(tournament)
+            if not matches:
+                break
+            await _run(
+                plugin,
+                FakeEvent(
+                    "u1",
+                    "房主",
+                    admin=False,
+                    text=f"major 胜 {matches[0].match_id} 1 2:0",
+                ),
+            )
+
+        # 自动归档；战绩仍在
+        assert plugin.store.load("g1", "testplat") is None
+        assert plugin.store.count_tournaments("g1", "testplat") == 1
+
+        # 无需手动重置，直接开下一局
+        results = await _run(
+            plugin, FakeEvent("u2", "选手2", text="major 创建房间 第二局杯")
+        )
+        assert "房间已创建" in results[0][1]
+        assert plugin.store.load("g1", "testplat").name == "第二局杯"
+
+    asyncio.run(scenario())
+
+
+def test_create_room_replaces_finished_active(tmp_path):
+    """历史数据里「已结束但还 active」的赛事，创建房间时应自动归档。"""
+    from astrbot_plugin_major_tournament.core.models import Tournament as T
+
+    plugin = _make_plugin(tmp_path)
+    stale = T(
+        group_id="g1",
+        platform_id="testplat",
+        name="老杯",
+        status="finished",
+    )
+    plugin.store.save(stale)
+    assert plugin.store.load("g1", "testplat") is not None
+
+    async def scenario():
+        results = await _run(
+            plugin, FakeEvent("u1", "房主", text="major 创建房间 新杯")
+        )
+        assert "房间已创建" in results[0][1]
+        assert plugin.store.load("g1", "testplat").name == "新杯"
 
     asyncio.run(scenario())
 
