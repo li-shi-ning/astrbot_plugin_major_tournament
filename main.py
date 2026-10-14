@@ -1116,26 +1116,57 @@ class MajorTournament(Star):
         ]
         return affordable or [candidates[-1]]
 
+    @staticmethod
+    def _is_valid_image(result: Any) -> bool:
+        """判断 T2I 返回的是不是真图片（远端偶发会返回错误页）。"""
+        if isinstance(result, (bytes, bytearray)):
+            head = bytes(result[:16])
+        else:
+            try:
+                with open(result, "rb") as handle:
+                    head = handle.read(16)
+            except (OSError, TypeError):
+                return False
+        return bool(head) and (
+            head.startswith((b"\xff\xd8", b"\x89PNG\r\n\x1a\n", b"GIF8"))
+            or (head.startswith(b"RIFF") and b"WEBP" in head)
+        )
+
     async def _render_html_image(self, html: str, width: int, height: int):
-        """把 HTML 交给 T2I 渲染成图片；清晰度优先，过大/失败自动降档。"""
+        """把 HTML 交给 T2I 渲染成图片。
+
+        清晰度优先；渲染失败、**或返回的不是图片**（远端偶发返回错误页）时
+        自动降档重试，最后再兜底重试一次。
+        """
         layout = {"width": max(1, int(width)), "height": max(1, int(height))}
+        scales = self._pick_render_scales(layout)
+        attempts = scales + [scales[-1]]  # 末尾再兜一次，抗远端偶发失败
+
         last_error: Exception | None = None
-        for scale in self._pick_render_scales(layout):
+        for index, scale in enumerate(attempts, start=1):
             options = {
                 "type": "png",
                 "full_page": True,
                 "quality": 100,
                 "device_scale_factor_level": scale,
+                "timeout": 120000,
             }
             try:
                 result = await self.html_render(
                     html, {}, return_url=False, options=options
                 )
-                if result:
-                    return result
             except Exception as exc:  # noqa: BLE001 - 高清失败则降档重试
                 last_error = exc
-                logger.warning(f"[Major] T2I 渲染档位 {scale} 失败，尝试降档: {exc}")
+                logger.warning(
+                    f"[Major] T2I 第 {index} 次渲染({scale})异常，降档重试: {exc}"
+                )
+                continue
+            if result and self._is_valid_image(result):
+                return result
+            last_error = RuntimeError("T2I 返回的不是有效图片")
+            logger.warning(
+                f"[Major] T2I 第 {index} 次渲染({scale})返回非图片，降档重试"
+            )
         if last_error is not None:
             raise last_error
         return None

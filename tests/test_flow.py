@@ -727,3 +727,41 @@ def test_profile_target_from_plain_text_mention(tmp_path):
         assert target not in captured["html"]  # 不应直接把 openid 当名字显示
 
     asyncio.run(scenario())
+
+
+def test_render_html_image_retries_when_not_image(tmp_path):
+    """T2I 返回非图片（错误页）时应自动重试，而不是直接报错。"""
+    plugin = _make_plugin(tmp_path)
+    bad = tmp_path / "err.jpg"
+    bad.write_text("<html>502 Bad Gateway</html>")
+    good = tmp_path / "ok.png"
+    good.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+
+    calls: list[str] = []
+
+    async def fake_render(tmpl, data, return_url=True, options=None):
+        calls.append(options["device_scale_factor_level"])
+        return str(bad) if len(calls) == 1 else str(good)
+
+    plugin.html_render = fake_render
+    result = asyncio.run(plugin._render_html_image("<html></html>", 600, 600))
+
+    assert result == str(good)
+    assert len(calls) >= 2, f"应重试，实际调用 {calls}"
+
+
+def test_render_html_image_raises_when_all_invalid(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    bad = tmp_path / "err.jpg"
+    bad.write_text("<html>error</html>")
+
+    async def fake_render(tmpl, data, return_url=True, options=None):
+        return str(bad)
+
+    plugin.html_render = fake_render
+    try:
+        asyncio.run(plugin._render_html_image("<html></html>", 600, 600))
+    except RuntimeError as exc:
+        assert "不是有效图片" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("全部失败时应抛错，交给上层回退文字")
