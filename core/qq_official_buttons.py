@@ -177,6 +177,8 @@ def build_panel_keyboard(
     start_btn = build_command_button(
         "major_start", "🚀 开赛", "major 开赛", visited_label="已开赛"
     )
+    champion_btn = build_command_button("major_champions", "🏆 冠军榜", "major 冠军榜")
+    profile_btn = build_command_button("major_profile", "🎖 名片", "major 名片")
     create_room_btn = build_command_button(
         "major_create_room",
         "🏠 创建房间",
@@ -188,10 +190,11 @@ def build_panel_keyboard(
     if not room_exists:
         # 还没创建房间：只提供创建入口
         rows.append({"buttons": [create_room_btn]})
-        rows.append({"buttons": [help_btn]})
+        rows.append({"buttons": [champion_btn, profile_btn, help_btn]})
     elif registration_open:
         rows.append({"buttons": [signup, leave, players]})
-        rows.append({"buttons": [bracket_btn, image_btn, history_btn, help_btn]})
+        rows.append({"buttons": [bracket_btn, image_btn, history_btn]})
+        rows.append({"buttons": [champion_btn, profile_btn, help_btn]})
         if can_manage:
             rows.append({"buttons": [start_btn, reset_btn]})
         else:
@@ -204,13 +207,13 @@ def build_panel_keyboard(
             next_matches = pending_matches(tournament)[:max_winner_rows]
             for offset, match in enumerate(next_matches):
                 rows.append({"buttons": _winner_buttons(tournament, match, offset)})
+        rows.append({"buttons": [champion_btn, profile_btn, history_btn, help_btn]})
+        if can_manage:
             footer: list[dict[str, Any]] = []
             if not has_decided_real_match(tournament):
                 footer.append(redraw_btn)
-            footer.extend([reset_btn, history_btn, help_btn])
+            footer.append(reset_btn)
             rows.append({"buttons": footer})
-        else:
-            rows.append({"buttons": [history_btn, help_btn]})
 
     return {"content": {"rows": rows[:MAX_ROWS]}}
 

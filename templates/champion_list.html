@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ viewport_w }}, height={{ viewport_h }}, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+  :root{
+    --line:#6c736f; --text:#e1e4e2; --muted:#9aa39d;
+    --green:#087f4e; --green-text:#79d7aa; --gold:#f2c14e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#171b18;
+    font-family:Inter,Roboto,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif;}
+  body{padding:16px;min-width:max-content;
+    display:flex;justify-content:center;align-items:flex-start;}
+  .board{
+    flex:0 0 auto;width:900px;border-radius:8px;overflow:hidden;
+    background:linear-gradient(180deg,#232824,#1d211e);
+    box-shadow:0 20px 55px rgba(0,0,0,.55);
+  }
+  .head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 22px;background:linear-gradient(90deg,#252b26,#1f2421);
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .head .t{font-size:19px;font-weight:900;letter-spacing:2px;color:#eef1ef}
+  .head .t .icon{margin-right:8px}
+  .head .c{font-size:12px;color:var(--muted);letter-spacing:.5px}
+  .list{
+    background:radial-gradient(circle at 30% 20%, rgba(90,102,96,.18), transparent 45%),
+      linear-gradient(90deg,#232824,#1f2421 55%,#1d211e);
+    padding:10px 14px 14px;
+  }
+  .row{
+    display:flex;align-items:center;gap:14px;
+    padding:11px 12px;margin-bottom:8px;border-radius:6px;
+    background:linear-gradient(90deg,#565a58 0%,#4e524f 100%);
+    box-shadow:0 1px 2px rgba(0,0,0,.14);
+  }
+  .row:last-child{margin-bottom:0}
+  .row.top1{background:linear-gradient(90deg,#6b6033 0%,#5a5230 100%);
+    box-shadow:0 0 0 1px rgba(242,193,78,.55),0 4px 14px rgba(242,193,78,.18)}
+  .rank{
+    flex:0 0 42px;height:42px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.26);color:#cfd6d2;font-size:15px;font-weight:900;letter-spacing:-.5px;
+  }
+  .row.top1 .rank{background:var(--gold);color:#1c1607}
+  .info{flex:1 1 auto;min-width:0}
+  .tname{
+    font-size:13.5px;font-weight:800;color:#eef1ef;letter-spacing:.6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .meta{margin-top:3px;font-size:10.5px;color:#a4ada7;letter-spacing:.4px}
+  .champ{
+    flex:0 0 auto;display:flex;align-items:center;gap:9px;
+    padding-left:12px;border-left:1px dashed rgba(255,255,255,.14);
+  }
+  .avatar{
+    width:38px;height:38px;border-radius:50%;overflow:hidden;flex:0 0 38px;
+    display:flex;align-items:center;justify-content:center;
+    background:#2f3431;border:1px solid rgba(255,255,255,.16);
+    font-size:15px;font-weight:900;color:#cfd6d2;
+  }
+  .avatar img{width:100%;height:100%;object-fit:cover;display:block}
+  .row.top1 .avatar{border-color:rgba(242,193,78,.7)}
+  .cname{max-width:170px;font-size:12.5px;font-weight:800;color:var(--gold);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .empty{padding:40px 0;text-align:center;color:var(--muted);font-size:13px}
+  .foot{padding:9px 22px;font-size:9.5px;letter-spacing:.4px;
+    color:rgba(255,255,255,.22);border-top:1px solid rgba(255,255,255,.05)}
+</style>
+</head>
+<body>
+<div class="board">
+  <div class="head">
+    <div class="t"><span class="icon">🏆</span>{{ title }}</div>
+    <div class="c">共 {{ total }} 场 · 按时间倒序</div>
+  </div>
+  <div class="list">
+    {% if rows %}
+      {% for r in rows %}
+      <div class="row{{ ' top1' if r.rank == 1 else '' }}">
+        <div class="rank">{{ r.rank }}</div>
+        <div class="info">
+          <div class="tname">{{ r.name }}</div>
+          <div class="meta">{{ r.date }} · {{ r.player_count }} 人参赛{% if r.size %} · {{ r.size }}强{% endif %}</div>
+        </div>
+        <div class="champ">
+          <div class="avatar">{% if r.champion_avatar %}<img src="{{ r.champion_avatar }}" alt="">{% else %}{{ r.champion_initial }}{% endif %}</div>
+          <div class="cname">{{ r.champion_name }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">还没有已完成的比赛</div>
+    {% endif %}
+  </div>
+  <div class="foot">AstrBot · MAJOR CHAMPIONS · 更新于 {{ updated_at }}</div>
+</div>
+</body>
+</html>

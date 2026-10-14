@@ -505,3 +505,92 @@ def test_render_scale_selection(tmp_path):
 
     plugin.config = {"image_scale": "high"}
     assert plugin._pick_render_scales(small)[0] == "high"
+
+
+async def _fake_image_render(tmpl, data, return_url=True, options=None):
+    """假的 T2I：直接返回一个合法 PNG 头。"""
+    return b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+
+def _play_to_finish(plugin, host_uid="u1", host_name="房主"):
+    """跑完一整局（返回每一条回复）。"""
+
+    async def inner():
+        await _create_room(
+            plugin, uid=host_uid, name=host_name, admin=False, args="测试杯 4"
+        )
+        for i in range(1, 5):
+            await _run(plugin, FakeEvent(f"u{i}", f"选手{i}", text="major 报名"))
+        await _run(
+            plugin, FakeEvent(host_uid, host_name, admin=False, text="major 开赛")
+        )
+        guard = 0
+        while guard < 20 and plugin.store.load("g1", "testplat") is not None:
+            guard += 1
+            tournament = plugin.store.load("g1", "testplat")
+            matches = pending_matches(tournament)
+            if not matches:
+                break
+            await _run(
+                plugin,
+                FakeEvent(
+                    host_uid,
+                    host_name,
+                    admin=False,
+                    text=f"major 胜 {matches[0].match_id} 1 2:0",
+                ),
+            )
+
+    return inner()
+
+
+def test_purge_command(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        # 造一个没打完的
+        await _create_room(plugin, uid="u1", name="房主", admin=False, args="烂尾杯")
+        await _run(plugin, FakeEvent("u2", "选手2", text="major 报名"))
+
+        denied = await _run(plugin, FakeEvent("u2", "选手2", text="major 清理"))
+        assert "管理员" in denied[0][1]
+
+        results = await _run(
+            plugin, FakeEvent("admin", "管理员", admin=True, text="major 清理")
+        )
+        assert "已清理 1 场" in results[0][1]
+        assert plugin.store.load("g1", "testplat") is None
+
+    asyncio.run(scenario())
+
+
+def test_champion_list_and_profile_commands(tmp_path):
+    plugin = _make_plugin(tmp_path)
+    plugin.html_render = _fake_image_render
+
+    async def scenario():
+        await _play_to_finish(plugin)
+
+        # 冠军榜图片
+        results = await _run(plugin, FakeEvent("u1", "选手1", text="major 冠军榜"))
+        assert results and results[0][0] == "b64image"
+
+        # 个人名片图片（默认查发送者）
+        results = await _run(plugin, FakeEvent("u1", "选手1", text="major 名片"))
+        assert results and results[0][0] == "b64image"
+
+        # 指定 user_id 查名片
+        results = await _run(plugin, FakeEvent("u3", "选手3", text="major 名片 u2"))
+        assert results and results[0][0] == "b64image"
+
+    asyncio.run(scenario())
+
+
+def test_champion_list_without_records(tmp_path):
+    plugin = _make_plugin(tmp_path)
+
+    async def scenario():
+        results = await _run(plugin, FakeEvent("u1", "选手1", text="major 冠军榜"))
+        assert "还没有产生冠军" in results[0][1]
+
+    asyncio.run(scenario())

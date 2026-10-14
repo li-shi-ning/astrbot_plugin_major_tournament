@@ -344,3 +344,17 @@ def test_running_panel_only_shows_next_match_buttons():
     assert f"major 胜 {first.match_id} 1" in win_datas
     assert f"major 胜 {first.match_id} 2" in win_datas
     assert len(rows) <= 5
+
+
+def test_panel_has_champion_and_profile_buttons():
+    t = make_tournament()
+    for manage in (False, True):
+        payload = build_panel_payload(t, can_manage=manage)
+        datas = [
+            b["action"]["data"]
+            for row in payload["keyboard"]["content"]["rows"]
+            for b in row["buttons"]
+        ]
+        assert "major 冠军榜" in datas
+        assert "major 名片" in datas
+        assert len(payload["keyboard"]["content"]["rows"]) <= 5

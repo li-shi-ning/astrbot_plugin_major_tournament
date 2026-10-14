@@ -81,3 +81,68 @@ def test_new_tournament_gets_new_id_and_history_isolated(tmp_path):
     db.save(second)
     assert second.tournament_id != first.tournament_id
     assert db.load("g1", "p1").tournament_id == second.tournament_id
+
+
+def _finish(db, name, platform="p1", group="g1", champion_seed=1):
+    """造一场打完的比赛。"""
+    t = Tournament(group_id=group, platform_id=platform, name=name, size=4)
+    for i in range(4):
+        t.add_player(f"u{i + 1}", f"P{i + 1}")
+    db.save(t)
+    loaded = db.load(group, platform)
+    start_tournament(loaded, size=4, seed_mode="register")
+    guard = 0
+    while loaded.status != "finished" and guard < 10:
+        guard += 1
+        matches = pending_matches(loaded)
+        if not matches:
+            break
+        set_winner(loaded, matches[0].match_id, str(champion_seed))
+    db.save(loaded)
+    db.delete(group, platform)
+    return loaded
+
+
+def test_purge_unfinished_removes_only_incomplete(tmp_path):
+    db = make_db(tmp_path)
+    _finish(db, "完整杯")
+
+    # 两场没打完的
+    for name in ("没打完A", "没打完B"):
+        t = Tournament(group_id="g1", platform_id="p1", name=name, size=4)
+        for i in range(4):
+            t.add_player(f"x{i}", f"X{i}")
+        db.save(t)
+        start_tournament(t, size=4, seed_mode="register")
+        db.save(t)
+        db.delete("g1", "p1")
+
+    assert db.count_tournaments("g1", "p1") == 3
+    removed = db.purge_unfinished("g1", "p1")
+    assert removed == 2
+    remaining = db.list_tournaments("g1", "p1")
+    assert [item["name"] for item in remaining] == ["完整杯"]
+    # 再次清理无事发生
+    assert db.purge_unfinished("g1", "p1") == 0
+
+
+def test_player_summary_counts_titles_and_runnerups(tmp_path):
+    db = make_db(tmp_path)
+    for name in ("第一届", "第二届"):
+        _finish(db, name, champion_seed=1)  # 每次都让 P1 夺冠
+
+    # P1 应该 2 冠 0 亚
+    summary = db.player_summary("g1", "p1", "u1")
+    assert summary["played"] == 2
+    assert len(summary["titles"]) == 2
+    assert len(summary["runnerups"]) == 0
+    assert summary["name"] == "P1"
+
+    # 其他人至少参赛 2 次，但没夺冠
+    other = db.player_summary("g1", "p1", "u2")
+    assert other["played"] == 2
+    assert len(other["titles"]) == 0
+
+    # 没参加过的
+    empty = db.player_summary("g1", "p1", "unknown")
+    assert empty["played"] == 0

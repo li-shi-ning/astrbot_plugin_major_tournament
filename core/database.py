@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import (
+    STATUS_FINISHED,
     Match,
     Player,
     Round,
@@ -448,6 +449,115 @@ class TournamentDatabase:
                 now_iso(),
             ),
         )
+
+    def purge_unfinished(self, group_id: str, platform_id: str = "") -> int:
+        """清理未完赛（非 finished）的赛事记录，返回清理条数。
+
+        这些赛事没有完整结果，属于脏数据；已结束的赛事不受影响。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT tournament_id FROM tournaments
+                WHERE group_id = ? AND platform_id = ? AND status <> ?
+                """,
+                (str(group_id), str(platform_id), STATUS_FINISHED),
+            ).fetchall()
+            ids = [row["tournament_id"] for row in rows]
+            for tid in ids:
+                self._conn.execute(
+                    "DELETE FROM players WHERE tournament_id = ?", (tid,)
+                )
+                self._conn.execute(
+                    "DELETE FROM matches WHERE tournament_id = ?", (tid,)
+                )
+                self._conn.execute(
+                    "DELETE FROM match_history WHERE tournament_id = ?", (tid,)
+                )
+                self._conn.execute(
+                    "DELETE FROM tournaments WHERE tournament_id = ?", (tid,)
+                )
+            self._conn.commit()
+        return len(ids)
+
+    def player_summary(
+        self, group_id: str, platform_id: str, user_id: str
+    ) -> dict[str, Any]:
+        """统计某人在该群的历史战绩：参赛场次、夺冠、亚军、冠军赛事列表。"""
+        uid = str(user_id or "").strip()
+        empty = {
+            "user_id": uid,
+            "name": uid,
+            "played": 0,
+            "titles": [],
+            "runnerups": [],
+        }
+        if not uid:
+            return empty
+
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT t.tournament_id, t.name, t.status, t.champion,
+                       t.created_at, t.size,
+                       p.name AS player_name
+                FROM players p
+                JOIN tournaments t ON t.tournament_id = p.tournament_id
+                WHERE t.group_id = ? AND t.platform_id = ? AND p.user_id = ?
+                ORDER BY t.created_at DESC, t.rowid DESC
+                """,
+                (str(group_id), str(platform_id), uid),
+            ).fetchall()
+
+            entries: list[dict[str, Any]] = []
+            for row in rows:
+                champion = row["champion"] or ""
+                champion_name = ""
+                if champion:
+                    found = self._conn.execute(
+                        "SELECT name FROM players WHERE tournament_id = ? AND user_id = ?",
+                        (row["tournament_id"], champion),
+                    ).fetchone()
+                    champion_name = found["name"] if found else ""
+                # 亚军：决赛（最后一轮）里输给冠军的人
+                final = self._conn.execute(
+                    """
+                    SELECT p1, p2, winner FROM matches
+                    WHERE tournament_id = ?
+                    ORDER BY round_index DESC, slot_index DESC LIMIT 1
+                    """,
+                    (row["tournament_id"],),
+                ).fetchone()
+                is_runnerup = bool(
+                    final
+                    and final["winner"]
+                    and uid in (final["p1"], final["p2"])
+                    and final["winner"] != uid
+                )
+                entries.append(
+                    {
+                        "tournament_id": row["tournament_id"],
+                        "name": row["name"],
+                        "status": row["status"],
+                        "champion": champion,
+                        "champion_name": champion_name,
+                        "created_at": row["created_at"],
+                        "size": int(row["size"] or 0),
+                        "player_name": row["player_name"] or uid,
+                        "is_champion": champion == uid,
+                        "is_runnerup": is_runnerup,
+                    }
+                )
+
+        name = entries[0]["player_name"] if entries else uid
+        return {
+            "user_id": uid,
+            "name": name,
+            "played": len(entries),
+            "titles": [item for item in entries if item["is_champion"]],
+            "runnerups": [item for item in entries if item["is_runnerup"]],
+            "timeline": entries,
+        }
 
     def delete(self, group_id: str, platform_id: str = "") -> bool:
         """结束当前赛事：置为非 active，但保留历史记录。"""

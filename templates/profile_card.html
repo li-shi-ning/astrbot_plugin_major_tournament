@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width={{ viewport_w }}, height={{ viewport_h }}, initial-scale=1.0">
+<title>{{ name }} · 名片</title>
+<style>
+  :root{
+    --text:#e1e4e2; --muted:#9aa39d; --green:#087f4e; --gold:#f2c14e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#171b18;
+    font-family:Inter,Roboto,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif;}
+  body{padding:16px;min-width:max-content;display:flex;justify-content:center;align-items:flex-start}
+  .card{
+    flex:0 0 auto;width:640px;border-radius:10px;overflow:hidden;
+    background:
+      radial-gradient(circle at 22% 8%, rgba(242,193,78,.16), transparent 42%),
+      radial-gradient(circle at 82% 30%, rgba(90,102,96,.22), transparent 46%),
+      linear-gradient(180deg,#252b26,#1c211d);
+    box-shadow:0 22px 60px rgba(0,0,0,.6);
+    border:1px solid rgba(242,193,78,.16);
+  }
+  .top{display:flex;align-items:center;gap:18px;padding:22px 24px;
+    border-bottom:1px solid rgba(255,255,255,.07)}
+  .avatar{
+    width:82px;height:82px;border-radius:50%;overflow:hidden;flex:0 0 82px;
+    display:flex;align-items:center;justify-content:center;
+    background:#2f3431;border:2px solid rgba(242,193,78,.55);
+    font-size:32px;font-weight:900;color:var(--gold);
+  }
+  .avatar img{width:100%;height:100%;object-fit:cover;display:block}
+  .who{min-width:0;flex:1 1 auto}
+  .who .name{font-size:24px;font-weight:900;letter-spacing:1.5px;color:#f4f7f5;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .who .sub{margin-top:5px;font-size:11.5px;color:var(--muted);letter-spacing:.5px}
+  .stats{display:flex;padding:18px 24px;gap:12px}
+  .stat{
+    flex:1 1 0;border-radius:8px;padding:14px 10px;text-align:center;
+    background:linear-gradient(180deg,#565a58,#4e524f);
+    box-shadow:0 1px 2px rgba(0,0,0,.16);
+  }
+  .stat .num{font-size:26px;font-weight:900;letter-spacing:-.5px;color:#eef1ef}
+  .stat .lbl{margin-top:4px;font-size:10.5px;color:#a8b1ab;letter-spacing:.6px}
+  .stat.gold{background:linear-gradient(180deg,#6b6033,#574f2c)}
+  .stat.gold .num{color:var(--gold)}
+  .stat.silver{background:linear-gradient(180deg,#565f66,#4a5259)}
+  .stat.silver .num{color:#cdd6dd}
+  .sec{padding:6px 24px 18px}
+  .sec-title{font-size:12px;font-weight:800;letter-spacing:2px;color:#9ea7a1;margin:10px 0 8px}
+  .item{
+    display:flex;align-items:center;gap:10px;padding:9px 12px;margin-bottom:6px;
+    border-radius:6px;background:linear-gradient(90deg,#4e524f,#484c49);
+  }
+  .item .badge{flex:0 0 auto;font-size:14px}
+  .item .nm{flex:1 1 auto;min-width:0;font-size:12.5px;font-weight:700;color:#e8ecea;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .dt{flex:0 0 auto;font-size:10.5px;color:#9aa39d}
+  .empty{font-size:11.5px;color:#7f8882;padding:4px 2px 8px}
+  .foot{padding:9px 24px;font-size:9.5px;letter-spacing:.4px;
+    color:rgba(255,255,255,.22);border-top:1px solid rgba(255,255,255,.05)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top">
+    <div class="avatar">{% if avatar %}<img src="{{ avatar }}" alt="">{% else %}{{ initial }}{% endif %}</div>
+    <div class="who">
+      <div class="name">{{ name }}</div>
+      <div class="sub">MAJOR 参赛记录 · {{ played }} 场 · 夺冠率 {{ win_rate }}%</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="num">{{ played }}</div><div class="lbl">参赛场次</div></div>
+    <div class="stat gold"><div class="num">{{ titles_count }}</div><div class="lbl">冠军</div></div>
+    <div class="stat silver"><div class="num">{{ runnerups_count }}</div><div class="lbl">亚军</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-title">🏆 冠军</div>
+    {% if titles %}
+      {% for t in titles %}
+      <div class="item"><span class="badge">🏆</span><span class="nm">{{ t.name }}</span><span class="dt">{{ t.date }}</span></div>
+      {% endfor %}
+    {% else %}<div class="empty">暂无冠军记录</div>{% endif %}
+    <div class="sec-title">🥈 亚军</div>
+    {% if runnerups %}
+      {% for t in runnerups %}
+      <div class="item"><span class="badge">🥈</span><span class="nm">{{ t.name }}</span><span class="dt">{{ t.date }}</span></div>
+      {% endfor %}
+    {% else %}<div class="empty">暂无亚军记录</div>{% endif %}
+  </div>
+  <div class="foot">AstrBot · MAJOR PLAYER CARD · 更新于 {{ updated_at }}</div>
+</div>
+</body>
+</html>

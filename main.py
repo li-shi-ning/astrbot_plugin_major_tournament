@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,20 @@ ACTION_ALIASES = {
     "名称": "命名",
     "name": "命名",
     "rename": "命名",
+    "冠军榜": "冠军榜",
+    "榜单": "冠军榜",
+    "冠军列表": "冠军榜",
+    "历届冠军": "冠军榜",
+    "champions": "冠军榜",
+    "名片": "名片",
+    "我的名片": "名片",
+    "战绩卡": "名片",
+    "我的战绩": "名片",
+    "profile": "名片",
+    "清理": "清理",
+    "清理记录": "清理",
+    "清理未完赛": "清理",
+    "purge": "清理",
     "记录": "记录",
     "战绩": "记录",
     "历史": "记录",
@@ -229,6 +244,9 @@ class MajorTournament(Star):
             "  major 命名 <名称>     修改比赛名称（房主/管理员）\n"
             "  major 重抽            重新随机抽签（房主/管理员）\n"
             "  major 记录 [页码]     比赛记录列表（按钮翻页、查看详情）\n"
+            "  major 冠军榜          历届冠军榜单图片\n"
+            "  major 名片 [@某人]     个人获奖名片图片\n"
+            "  major 清理            清理未完赛的脏记录（管理员）\n"
             "  major 对阵            文字版赛程\n"
             "  major 图              渲染 Major 对阵图\n"
             "【人工判定】（房主/管理员）\n"
@@ -303,6 +321,15 @@ class MajorTournament(Star):
                 yield item
         elif action == "重抽":
             async for item in self._handle_redraw(event, args):
+                yield item
+        elif action == "冠军榜":
+            async for item in self._handle_champion_list(event):
+                yield item
+        elif action == "名片":
+            async for item in self._handle_profile(event, args):
+                yield item
+        elif action == "清理":
+            async for item in self._handle_purge(event):
                 yield item
         elif action == "记录":
             async for item in self._handle_history(event, args):
@@ -644,6 +671,89 @@ class MajorTournament(Star):
             STATUS_FINISHED: "已结束",
         }.get(status, str(status))
 
+    @staticmethod
+    def _now_text() -> str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    async def _handle_champion_list(self, event: AstrMessageEvent):
+        """历届冠军榜（图片）。"""
+        records = [
+            row
+            for row in self.store.list_tournaments(
+                self._group_id(event), self._platform_id(event), limit=50, offset=0
+            )
+            if row.get("champion")
+        ]
+        if not records:
+            yield event.plain_result("ℹ️ 还没有产生冠军的比赛。")
+            return
+
+        avatar_map = await self._fetch_avatars(
+            [str(row["champion"]) for row in records], event
+        )
+        html = self.renderer.render_champion_list(
+            records, avatar_map, updated_at=self._now_text()
+        )
+        width, height = self.renderer.champion_list_size(len(records))
+        try:
+            result = await self._render_html_image(html, width, height)
+        except Exception as exc:  # noqa: BLE001
+            yield event.plain_result(f"❌ 冠军榜渲染失败：{exc}")
+            return
+        async for item in self._yield_bracket_image(event, result):
+            yield item
+
+    def _resolve_profile_target(self, event: AstrMessageEvent, args: list[str]) -> str:
+        mentions = self._extract_mentions(event)
+        if mentions:
+            return mentions[0]
+        if args and args[0].strip():
+            return args[0].strip()
+        return str(event.get_sender_id() or "")
+
+    async def _handle_profile(self, event: AstrMessageEvent, args: list[str]):
+        """个人获奖名片（图片）。"""
+        user_id = self._resolve_profile_target(event, args)
+        if not user_id:
+            yield event.plain_result("❌ 无法确定要查询的成员。")
+            return
+
+        summary = self.store.player_summary(
+            self._group_id(event), self._platform_id(event), user_id
+        )
+        sender_id = str(event.get_sender_id() or "")
+        if not summary.get("name") or summary.get("name") == user_id:
+            if user_id == sender_id:
+                summary["name"] = str(event.get_sender_name() or "") or user_id
+
+        avatar_map = await self._fetch_avatars([user_id], event)
+        html = self.renderer.render_profile(
+            summary, avatar_map, updated_at=self._now_text()
+        )
+        width, height = self.renderer.profile_card_size(
+            len(summary.get("titles") or []), len(summary.get("runnerups") or [])
+        )
+        try:
+            result = await self._render_html_image(html, width, height)
+        except Exception as exc:  # noqa: BLE001
+            yield event.plain_result(f"❌ 名片渲染失败：{exc}")
+            return
+        async for item in self._yield_bracket_image(event, result):
+            yield item
+
+    async def _handle_purge(self, event: AstrMessageEvent):
+        """清理未完赛的脏记录（管理员）。"""
+        if not event.is_admin():
+            yield event.plain_result("❌ 只有管理员可以清理比赛记录。")
+            return
+        removed = self.store.purge_unfinished(
+            self._group_id(event), self._platform_id(event)
+        )
+        if removed:
+            yield event.plain_result(f"🧹 已清理 {removed} 场未完赛的记录。")
+        else:
+            yield event.plain_result("ℹ️ 没有需要清理的未完赛记录。")
+
     async def _handle_history(self, event: AstrMessageEvent, args: list[str]):
         """比赛记录：按钮列表 + 分页。"""
         group_id = self._group_id(event)
@@ -945,22 +1055,32 @@ class MajorTournament(Star):
             fallback = fallback or appid
         return fallback
 
-    async def _collect_avatar_map(
-        self, tournament: Tournament, event: AstrMessageEvent
+    async def _fetch_avatars(
+        self, user_ids: list[str], event: AstrMessageEvent
     ) -> dict[str, str]:
-        """下载所有选手头像，返回 {user_id: data_uri}。"""
+        """下载一批用户头像，返回 {user_id: data_uri}。"""
+        ids = [str(uid) for uid in user_ids if uid]
+        if not ids:
+            return {}
         platform_name = self._platform_name(event)
         appid = self._resolve_appid(event)
-        user_ids = [player.user_id for player in tournament.players]
-        urls = [build_avatar_url(user_id, platform_name, appid) for user_id in user_ids]
+        urls = [build_avatar_url(uid, platform_name, appid) for uid in ids]
         if not any(urls):
             return {}
         data_uris = await self.avatar_fetcher.fetch_many(urls)
         return {
-            user_id: data_uri
-            for user_id, data_uri in zip(user_ids, data_uris, strict=False)
+            uid: data_uri
+            for uid, data_uri in zip(ids, data_uris, strict=False)
             if data_uri
         }
+
+    async def _collect_avatar_map(
+        self, tournament: Tournament, event: AstrMessageEvent
+    ) -> dict[str, str]:
+        """下载所有选手头像，返回 {user_id: data_uri}。"""
+        return await self._fetch_avatars(
+            [player.user_id for player in tournament.players], event
+        )
 
     #: device_scale_factor_level -> 大致像素倍率（用于估算图片大小）
     _SCALE_RATIOS = {"normal": 1.0, "high": 1.35, "ultra": 1.8}
@@ -988,17 +1108,9 @@ class MajorTournament(Star):
         ]
         return affordable or [candidates[-1]]
 
-    async def _render_bracket_image(
-        self, tournament: Tournament, event: AstrMessageEvent
-    ):
-        """调用 AstrBot T2I 渲染对阵图，返回 bytes 或 URL/路径。
-
-        默认用最高清晰度，失败或图片过大时自动降档重试。
-        """
-        avatar_map = await self._collect_avatar_map(tournament, event)
-        html = self.renderer.render_html(tournament, avatar_map=avatar_map)
-        layout = self.renderer.build_bracket_layout(tournament, avatar_map=avatar_map)
-
+    async def _render_html_image(self, html: str, width: int, height: int):
+        """把 HTML 交给 T2I 渲染成图片；清晰度优先，过大/失败自动降档。"""
+        layout = {"width": max(1, int(width)), "height": max(1, int(height))}
         last_error: Exception | None = None
         for scale in self._pick_render_scales(layout):
             options = {
@@ -1019,6 +1131,17 @@ class MajorTournament(Star):
         if last_error is not None:
             raise last_error
         return None
+
+    async def _render_bracket_image(
+        self, tournament: Tournament, event: AstrMessageEvent
+    ):
+        """渲染对阵图（带头像）。"""
+        avatar_map = await self._collect_avatar_map(tournament, event)
+        html = self.renderer.render_html(tournament, avatar_map=avatar_map)
+        layout = self.renderer.build_bracket_layout(tournament, avatar_map=avatar_map)
+        return await self._render_html_image(
+            html, layout["width"] + 32, layout["height"] + 108
+        )
 
     @staticmethod
     async def _yield_bracket_image(event: AstrMessageEvent, result):

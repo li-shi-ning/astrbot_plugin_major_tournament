@@ -37,6 +37,10 @@ RIGHT_PAD = 18
 BOTTOM_PAD = 22
 LABEL_TOP = 8
 
+#: 冠军榜 / 名片的版面宽度（px）
+CHAMPION_LIST_WIDTH = 900
+PROFILE_CARD_WIDTH = 640
+
 
 class BracketRenderer:
     """负责把赛事对象渲染为 HTML 或纯文本对阵表。"""
@@ -291,6 +295,107 @@ class BracketRenderer:
             top=top,
             avatar_map=avatar_map,
             champion=True,
+        )
+
+    # ────────── 冠军榜 / 个人名片 ──────────
+    @staticmethod
+    def champion_list_size(count: int) -> tuple[int, int]:
+        """冠军榜内容估算尺寸（宽, 高）。"""
+        return CHAMPION_LIST_WIDTH + 32, 136 + max(1, count) * 74
+
+    @staticmethod
+    def profile_card_size(titles: int, runnerups: int) -> tuple[int, int]:
+        """名片内容估算尺寸（宽, 高）。"""
+        return PROFILE_CARD_WIDTH + 32, 400 + (titles + runnerups) * 40
+
+    @staticmethod
+    def _format_date(raw: str | None) -> str:
+        text = str(raw or "")
+        try:
+            from datetime import datetime
+
+            return datetime.fromisoformat(text).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            return text[:10]
+
+    def render_champion_list(
+        self,
+        records: list[dict[str, Any]],
+        avatar_map: dict[str, str] | None = None,
+        *,
+        title: str = "Major 冠军榜",
+        updated_at: str = "",
+    ) -> str:
+        """渲染「历届冠军榜」图片。records 来自 list_tournaments。"""
+        rows = []
+        for index, record in enumerate(records):
+            champion = str(record.get("champion") or "")
+            champion_name = (
+                record.get("champion_name") or (champion if champion else "") or "—"
+            )
+            rows.append(
+                {
+                    "rank": index + 1,
+                    "name": record.get("name") or "未命名赛事",
+                    "date": self._format_date(record.get("created_at")),
+                    "player_count": record.get("player_count") or 0,
+                    "size": record.get("size") or 0,
+                    "champion_name": champion_name,
+                    "champion_avatar": (avatar_map or {}).get(champion),
+                    "champion_initial": self._initial(champion_name),
+                }
+            )
+
+        width, content_height = self.champion_list_size(len(rows))
+        template = self.env.get_template("champion_list.html")
+        return template.render(
+            title=title,
+            rows=rows,
+            total=len(rows),
+            updated_at=updated_at,
+            viewport_w=width,
+            viewport_h=max(180, int(content_height * 0.85)),
+        )
+
+    def render_profile(
+        self,
+        summary: dict[str, Any],
+        avatar_map: dict[str, str] | None = None,
+        *,
+        updated_at: str = "",
+    ) -> str:
+        """渲染「个人获奖名片」图片。summary 来自 player_summary。"""
+        user_id = str(summary.get("user_id") or "")
+        name = str(summary.get("name") or user_id)
+        played = int(summary.get("played") or 0)
+        titles = list(summary.get("titles") or [])
+        runnerups = list(summary.get("runnerups") or [])
+        win_rate = round(len(titles) / played * 100) if played else 0
+
+        def pack(items: list[dict[str, Any]]) -> list[dict[str, str]]:
+            return [
+                {
+                    "name": item.get("name") or "未命名赛事",
+                    "date": self._format_date(item.get("created_at")),
+                }
+                for item in items
+            ]
+
+        width, content_height = self.profile_card_size(len(titles), len(runnerups))
+        template = self.env.get_template("profile_card.html")
+        return template.render(
+            name=name,
+            initial=self._initial(name),
+            avatar=(avatar_map or {}).get(user_id),
+            played=played,
+            titles_count=len(titles),
+            runnerups_count=len(runnerups),
+            win_rate=win_rate,
+            titles=pack(titles),
+            runnerups=pack(runnerups),
+            updated_at=updated_at,
+            viewport_w=width,
+            viewport_h=max(200, int(content_height * 0.85)),
         )
 
     @staticmethod
