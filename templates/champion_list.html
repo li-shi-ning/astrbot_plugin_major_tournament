@@ -6,97 +6,221 @@
 <title>{{ title }}</title>
 <style>
   :root{
-    --line:#6c736f; --text:#e1e4e2; --muted:#9aa39d;
-    --green:#087f4e; --green-text:#79d7aa; --gold:#f2c14e;
+    color-scheme:dark;
+    --cyan:#72f6ff; --blue:#5e83ff; --purple:#a879ff;
+    --muted:#94a4bd; --white:#eaf6ff; --gold:#f2c14e;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;background:#171b18;
-    font-family:Inter,Roboto,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif;}
-  body{padding:16px;min-width:max-content;
-    display:flex;justify-content:center;align-items:flex-start;}
-  .board{
-    flex:0 0 auto;width:900px;border-radius:8px;overflow:hidden;
-    background:linear-gradient(180deg,#232824,#1d211e);
-    box-shadow:0 20px 55px rgba(0,0,0,.55);
+  html,body{
+    margin:0;padding:0;
+    font-family:'Space Grotesk','Noto Sans SC','PingFang SC','Microsoft YaHei',Inter,Arial,sans-serif;
   }
-  .head{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:16px 22px;background:linear-gradient(90deg,#252b26,#1f2421);
-    border-bottom:1px solid rgba(255,255,255,.06);
+  body{
+    padding:16px;min-width:max-content;
+    display:flex;justify-content:center;align-items:flex-start;
+    background:
+      radial-gradient(circle at 15% 12%, #152953 0, transparent 30%),
+      radial-gradient(circle at 88% 82%, #231948 0, transparent 35%),
+      #050915;
   }
-  .head .t{font-size:19px;font-weight:900;letter-spacing:2px;color:#eef1ef}
-  .head .t .icon{margin-right:8px}
-  .head .c{font-size:12px;color:var(--muted);letter-spacing:.5px}
-  .list{
-    background:radial-gradient(circle at 30% 20%, rgba(90,102,96,.18), transparent 45%),
-      linear-gradient(90deg,#232824,#1f2421 55%,#1d211e);
-    padding:10px 14px 14px;
+  .card{
+    flex:0 0 auto;width:900px;position:relative;overflow:hidden;
+    border-radius:20px;border:1px solid #87d9ff52;
+    background:linear-gradient(128deg,#101c35 4%,#0c1226 53%,#14132b);
+    box-shadow:0 35px 90px rgba(0,0,0,.6), 0 0 45px rgba(36,157,255,.08),
+               inset 0 1px 0 #d5f5ff27;
   }
+  .grid{
+    position:absolute;inset:0;opacity:.26;pointer-events:none;
+    background-image:linear-gradient(#83d2ff21 1px,transparent 1px),
+                     linear-gradient(90deg,#83d2ff21 1px,transparent 1px);
+    background-size:31px 31px;
+    -webkit-mask-image:linear-gradient(90deg,transparent 4%,black 40%);
+    mask-image:linear-gradient(90deg,transparent 4%,black 40%);
+  }
+  .card::after{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.28;
+    background:repeating-linear-gradient(0deg,transparent 0,transparent 3px,#91b5ff0a 4px);
+  }
+  .accentline{
+    position:absolute;top:0;left:7%;width:56%;height:2px;z-index:3;
+    background:linear-gradient(90deg,transparent,var(--cyan),var(--purple),transparent);
+    box-shadow:0 0 22px var(--cyan);
+  }
+  .corner{position:absolute;width:26px;height:26px;border-color:#79eaff85;border-style:solid;z-index:3}
+  .corner.tl{left:14px;top:14px;border-width:2px 0 0 2px}
+  .corner.br{right:14px;bottom:14px;border-width:0 2px 2px 0}
+  .orbit{
+    position:absolute;width:36%;aspect-ratio:1;right:-12%;top:-30%;z-index:1;
+    border:1px solid #5bd5ff40;border-radius:50%;
+    box-shadow:0 0 0 34px #6bbaff07, 0 0 0 70px #6bbaff07, 0 0 0 106px #6bbaff07;
+  }
+  .orbit::before{content:"";position:absolute;inset:17%;border:1px dashed #72f6ff66;border-radius:50%}
+  .orbit::after{
+    content:"";position:absolute;left:10%;top:18%;width:8px;height:8px;
+    background:var(--cyan);border-radius:50%;box-shadow:0 0 18px var(--cyan);
+  }
+
+  .inner{position:relative;z-index:2;padding:26px 30px 22px}
+
+  /* ── 顶栏 ── */
+  .toprow{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+  .brand{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;
+    letter-spacing:.2em;color:#dff4ff}
+  .mark{
+    width:27px;height:27px;display:grid;place-items:center;transform:rotate(45deg);
+    border:1px solid #91eeff8c;border-radius:5px;color:var(--cyan);
+    box-shadow:0 0 12px #00d9ff40;font-size:15px;
+  }
+  .mark span{transform:rotate(-45deg);display:block;line-height:1}
+  .status{font-size:10.5px;letter-spacing:.16em;color:#94e0ec;white-space:nowrap}
+  .pulse{
+    display:inline-block;height:5px;width:5px;border-radius:50%;margin-right:7px;
+    background:#6bffcb;box-shadow:0 0 12px #6bffcb;vertical-align:middle;
+  }
+
+  /* ── 标题 ── */
+  .headline{margin:0 0 18px}
+  .headline .tiny{color:#79dcef;letter-spacing:.32em;font-size:10px;margin-bottom:8px}
+  .headline h1{
+    margin:0;font-size:30px;font-weight:700;letter-spacing:.06em;line-height:1.15;
+    background:linear-gradient(100deg,#ffffff,#70dcff 65%,#a58eff);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+
+  /* ── 榜单行 ── */
   .row{
-    display:flex;align-items:center;gap:14px;
-    padding:11px 12px;margin-bottom:8px;border-radius:6px;
-    background:linear-gradient(90deg,#565a58 0%,#4e524f 100%);
-    box-shadow:0 1px 2px rgba(0,0,0,.14);
+    position:relative;display:flex;align-items:center;gap:16px;
+    padding:13px 16px;margin-bottom:10px;border-radius:12px;
+    border:1px solid #3d6c8f4a;
+    background:linear-gradient(100deg,#142744,#0e1728);
+    box-shadow:inset 0 1px 0 #bfefff12;
   }
   .row:last-child{margin-bottom:0}
-  .row.top1{background:linear-gradient(90deg,#6b6033 0%,#5a5230 100%);
-    box-shadow:0 0 0 1px rgba(242,193,78,.55),0 4px 14px rgba(242,193,78,.18)}
-  .rank{
-    flex:0 0 42px;height:42px;border-radius:6px;display:flex;align-items:center;justify-content:center;
-    background:rgba(0,0,0,.26);color:#cfd6d2;font-size:15px;font-weight:900;letter-spacing:-.5px;
+  .row.top1{
+    border-color:#f2c14e77;
+    background:linear-gradient(100deg,#2f2814,#161206);
+    box-shadow:0 0 26px rgba(242,193,78,.14), inset 0 1px 0 #ffe9b81f;
   }
-  .row.top1 .rank{background:var(--gold);color:#1c1607}
+  .rank{
+    flex:0 0 46px;height:46px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-size:17px;font-weight:700;letter-spacing:-.02em;
+    color:#bfeaff;border:1px solid #4fa9d966;
+    background:linear-gradient(160deg,#12294a,#0b1526);
+    text-shadow:0 0 16px #72f6ff66;
+  }
+  .row.top1 .rank{
+    color:#1b1403;border-color:#f2c14e;
+    background:linear-gradient(160deg,#ffe08a,#e2a92f);
+    box-shadow:0 0 22px rgba(242,193,78,.5);text-shadow:none;
+  }
   .info{flex:1 1 auto;min-width:0}
   .tname{
-    font-size:13.5px;font-weight:800;color:#eef1ef;letter-spacing:.6px;
+    font-size:14px;font-weight:700;letter-spacing:.05em;color:#e6f4ff;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .meta{margin-top:3px;font-size:10.5px;color:#a4ada7;letter-spacing:.4px}
-  .champ{
-    flex:0 0 auto;display:flex;align-items:center;gap:9px;
-    padding-left:12px;border-left:1px dashed rgba(255,255,255,.14);
+  .row.top1 .tname{color:#ffe9b8}
+  .meta{
+    margin-top:5px;font-size:10px;letter-spacing:.14em;color:#7692b1;
+    display:flex;align-items:center;gap:10px;
   }
+  .meta .dot{width:4px;height:4px;border-radius:50%;background:#3f6d92;display:inline-block}
+  .champ{
+    flex:0 0 auto;display:flex;align-items:center;gap:11px;
+    padding-left:16px;border-left:1px dashed #2f5a7c;
+  }
+  .row.top1 .champ{border-left-color:#6d5a20}
+  .avatar-wrap{position:relative;flex:0 0 44px;width:44px;height:44px}
+  .avatar-ring{
+    position:absolute;inset:-4px;border-radius:50%;
+    border:1px solid #72f6ff4d;box-shadow:0 0 14px #29c8ff2e;
+  }
+  .row.top1 .avatar-ring{border-color:#f2c14e88;box-shadow:0 0 16px rgba(242,193,78,.35)}
   .avatar{
-    width:38px;height:38px;border-radius:50%;overflow:hidden;flex:0 0 38px;
+    position:absolute;inset:0;border-radius:50%;overflow:hidden;
     display:flex;align-items:center;justify-content:center;
-    background:#2f3431;border:1px solid rgba(255,255,255,.16);
-    font-size:15px;font-weight:900;color:#cfd6d2;
+    background:radial-gradient(circle at 30% 25%,#1c4a6b,#0b1a2c);
+    border:1px solid rgba(114,246,255,.45);
+    font-size:16px;font-weight:800;color:var(--cyan);
+    text-shadow:0 0 14px #72f6ff88;
   }
   .avatar img{width:100%;height:100%;object-fit:cover;display:block}
-  .row.top1 .avatar{border-color:rgba(242,193,78,.7)}
-  .cname{max-width:170px;font-size:12.5px;font-weight:800;color:var(--gold);
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .empty{padding:40px 0;text-align:center;color:var(--muted);font-size:13px}
-  .foot{padding:9px 22px;font-size:9.5px;letter-spacing:.4px;
-    color:rgba(255,255,255,.22);border-top:1px solid rgba(255,255,255,.05)}
+  .cname{
+    max-width:190px;font-size:13px;font-weight:700;letter-spacing:.05em;color:var(--cyan);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    text-shadow:0 0 18px #72f6ff55;
+  }
+  .row.top1 .cname{color:var(--gold);text-shadow:0 0 20px rgba(242,193,78,.6)}
+  .crown{flex:0 0 auto;font-size:14px;filter:drop-shadow(0 0 8px #f2c14e88)}
+
+  .empty{padding:46px 0;text-align:center;color:#5d7893;font-size:12.5px;letter-spacing:.12em}
+
+  /* ── 底栏 ── */
+  .foot{
+    position:relative;display:flex;justify-content:space-between;align-items:center;
+    margin-top:20px;padding-top:13px;border-top:1px solid #2a4a6a66;
+  }
+  .foot .id{font-size:9.5px;letter-spacing:.24em;color:#7692b1}
+  .chip{display:flex;gap:5px;align-items:flex-end;height:20px}
+  .chip i{width:3px;background:var(--cyan);opacity:.65;box-shadow:0 0 8px #72f6ff88}
+  .chip i:nth-child(1){height:9px}
+  .chip i:nth-child(2){height:15px}
+  .chip i:nth-child(3){height:11px}
+  .chip i:nth-child(4){height:19px}
+  .chip i:nth-child(5){height:7px}
 </style>
 </head>
 <body>
-<div class="board">
-  <div class="head">
-    <div class="t"><span class="icon">🏆</span>{{ title }}</div>
-    <div class="c">共 {{ total }} 场 · 按时间倒序</div>
-  </div>
-  <div class="list">
+<div class="card">
+  <div class="grid"></div>
+  <div class="orbit"></div>
+  <div class="accentline"></div>
+  <i class="corner tl"></i>
+  <i class="corner br"></i>
+
+  <div class="inner">
+    <div class="toprow">
+      <div class="brand"><div class="mark"><span>✦</span></div>MAJOR / 冠军榜</div>
+      <div class="status"><i class="pulse"></i>HALL OF CHAMPIONS</div>
+    </div>
+
+    <div class="headline">
+      <div class="tiny">历届冠军 · 按时间倒序</div>
+      <h1>{{ title }}</h1>
+    </div>
+
     {% if rows %}
       {% for r in rows %}
       <div class="row{{ ' top1' if r.rank == 1 else '' }}">
         <div class="rank">{{ r.rank }}</div>
         <div class="info">
           <div class="tname">{{ r.name }}</div>
-          <div class="meta">{{ r.date }} · {{ r.player_count }} 人参赛{% if r.size %} · {{ r.size }}强{% endif %}</div>
+          <div class="meta">
+            <span>{{ r.date }}</span>
+            <span class="dot"></span>
+            <span>{{ r.player_count }} 人参赛</span>
+            {% if r.size %}<span class="dot"></span><span>{{ r.size }} 强</span>{% endif %}
+          </div>
         </div>
         <div class="champ">
-          <div class="avatar">{% if r.champion_avatar %}<img src="{{ r.champion_avatar }}" alt="">{% else %}{{ r.champion_initial }}{% endif %}</div>
-          <div class="cname">{{ r.champion_name }}</div>
+          <div class="avatar-wrap">
+            <div class="avatar-ring"></div>
+            <div class="avatar">{% if r.champion_avatar %}<img src="{{ r.champion_avatar }}" alt="">{% else %}{{ r.champion_initial }}{% endif %}</div>
+          </div>
+          {% if r.rank == 1 %}<span class="crown">👑</span>{% endif %}
+          <span class="cname">{{ r.champion_name }}</span>
         </div>
       </div>
       {% endfor %}
     {% else %}
-      <div class="empty">还没有已完成的比赛</div>
+      <div class="empty">暂无已完成的比赛</div>
     {% endif %}
+
+    <div class="foot">
+      <span class="id">DIGITAL HALL OF FAME — {{ total }} ENTRIES</span>
+      <div class="chip"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
   </div>
-  <div class="foot">AstrBot · MAJOR CHAMPIONS · 更新于 {{ updated_at }}</div>
 </div>
 </body>
 </html>

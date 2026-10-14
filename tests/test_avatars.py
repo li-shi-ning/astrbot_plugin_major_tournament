@@ -195,3 +195,39 @@ def test_render_profile_uses_neon_card_fields():
     assert summary["name"] in html
     assert "参赛场次" in html and "冠军" in html and "亚军" in html
     assert "DIGITAL PLAYER ID" in html
+
+
+def test_render_champion_list_uses_neon_style():
+    """冠军榜模板应渲染出科技感元素与冠军信息。"""
+    renderer = BracketRenderer(Path(__file__).resolve().parents[1] / "templates")
+    records = [
+        {
+            "name": "新宿决战",
+            "created_at": "2026-09-17T10:00:00+08:00",
+            "player_count": 8,
+            "size": 8,
+            "champion": "u1",
+            "champion_name": "四",
+        },
+        {
+            "name": "群友杯",
+            "created_at": "2026-09-15T20:00:00+08:00",
+            "player_count": 16,
+            "size": 16,
+            "champion": "u2",
+            "champion_name": "默然",
+        },
+    ]
+    html = renderer.render_champion_list(
+        records, {"u1": "data:image/png;base64,AAAA"}, updated_at="2026-11-05 12:30"
+    )
+
+    assert "orbit" in html
+    assert "corner tl" in html
+    assert "accentline" in html
+    assert "HALL OF CHAMPIONS" in html
+    assert "新宿决战" in html and "群友杯" in html
+    assert "四" in html and "默然" in html
+    assert 'src="data:image/png;base64,AAAA"' in html
+    assert "DIGITAL HALL OF FAME" in html
+    assert "top1" in html  # 第一名高亮

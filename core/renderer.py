@@ -302,7 +302,7 @@ class BracketRenderer:
     @staticmethod
     def champion_list_size(count: int) -> tuple[int, int]:
         """冠军榜内容估算尺寸（宽, 高）。"""
-        return CHAMPION_LIST_WIDTH + 32, 136 + max(1, count) * 74
+        return CHAMPION_LIST_WIDTH + 32, 260 + max(1, count) * 82
 
     @staticmethod
     def profile_card_size(titles: int, runnerups: int) -> tuple[int, int]:
