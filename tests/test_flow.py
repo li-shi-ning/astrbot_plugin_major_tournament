@@ -14,19 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 pytest.importorskip("astrbot", reason="需要 AstrBot 运行环境")
 
+from astrbot.core.message.components import At as RealAt  # noqa: E402
 from astrbot_plugin_major_tournament.core.bracket import pending_matches  # noqa: E402
 from astrbot_plugin_major_tournament.core.database import (  # noqa: E402
     TournamentDatabase,
 )
 from astrbot_plugin_major_tournament.main import MajorTournament  # noqa: E402
-
-
-class FakeAt:
-    """模拟 astrbot 的 At 组件。"""
-
-    def __init__(self, qq, name=""):
-        self.qq = qq
-        self.name = name
 
 
 class FakeEvent:
@@ -621,7 +614,13 @@ def test_champion_list_without_records(tmp_path):
 def test_profile_mention_ignores_bot_self(tmp_path):
     """@机器人唤醒时不能把机器人自己当成名片目标。"""
     plugin = _make_plugin(tmp_path)
-    plugin.html_render = _fake_image_render
+    captured: dict[str, str] = {}
+
+    async def fake_render(tmpl, data, return_url=True, options=None):
+        captured["html"] = tmpl
+        return b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    plugin.html_render = fake_render
 
     async def scenario():
         await _play_to_finish(plugin)  # u1 房主，最后 u1 赢
@@ -630,18 +629,19 @@ def test_profile_mention_ignores_bot_self(tmp_path):
         event = FakeEvent(
             "u9",
             "路人",
-            text="major 名片 @选手1",
+            text="major 名片",
             messages=[
-                FakeAt("BOT_OPENID", "梅露露"),
-                FakeAt("u1", "选手1"),
+                RealAt(qq="BOT_OPENID", name="梅露露"),
+                RealAt(qq="u1", name="选手1"),
             ],
         )
         results = await _run(plugin, event)
         assert results and results[0][0] == "b64image"
 
-        # 目标应是 u1（有战绩），而不是机器人（0 场）
-        summary = plugin.store.player_summary("g1", "testplat", "u1")
-        assert summary["played"] == 1
+        # 渲染的应是 u1 的名片，而不是机器人
+        assert "选手1" in captured["html"]
+        assert "梅露露" not in captured["html"]
+        assert "BOT_OPENID" not in captured["html"]
 
     asyncio.run(scenario())
 
@@ -657,7 +657,10 @@ def test_profile_name_fallback_when_no_records(tmp_path):
             "u1",
             "发起人",
             text="major 名片",
-            messages=[FakeAt("BOT_OPENID", "机器人"), FakeAt(openid, "没参过赛的人")],
+            messages=[
+                RealAt(qq="BOT_OPENID", name="机器人"),
+                RealAt(qq=openid, name="没参过赛的人"),
+            ],
         )
         # 直接调用处理器，验证 summary 里的名字被兜底
         # （用 _pretty_name 单测更直接）
