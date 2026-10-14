@@ -208,7 +208,16 @@ def build_panel_keyboard(
             for offset, match in enumerate(next_matches):
                 rows.append({"buttons": _winner_buttons(tournament, match, offset)})
         rows.append({"buttons": [champion_btn, profile_btn, history_btn, help_btn]})
-        if can_manage:
+        if tournament.status == STATUS_FINISHED:
+            # 已结束（历史数据可能还没归档）：直接给「创建房间」入口
+            rows.append(
+                {
+                    "buttons": [create_room_btn, reset_btn]
+                    if can_manage
+                    else [create_room_btn]
+                }
+            )
+        elif can_manage:
             footer: list[dict[str, Any]] = []
             if not has_decided_real_match(tournament):
                 footer.append(redraw_btn)

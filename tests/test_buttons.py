@@ -358,3 +358,20 @@ def test_panel_has_champion_and_profile_buttons():
         assert "major 冠军榜" in datas
         assert "major 名片" in datas
         assert len(payload["keyboard"]["content"]["rows"]) <= 5
+
+
+def test_finished_panel_offers_create_room():
+    """已结束（历史数据未归档）时，面板应给出创建房间入口。"""
+    from astrbot_plugin_major_tournament.core.models import STATUS_FINISHED
+
+    t = make_tournament()
+    start_tournament(t, size=8, seed_mode="register")
+    t.status = STATUS_FINISHED
+    payload = build_panel_payload(t, can_manage=True)
+    datas = [
+        b["action"]["data"]
+        for row in payload["keyboard"]["content"]["rows"]
+        for b in row["buttons"]
+    ]
+    assert "major 创建房间 " in datas
+    assert len(payload["keyboard"]["content"]["rows"]) <= 5
