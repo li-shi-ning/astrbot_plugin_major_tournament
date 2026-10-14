@@ -8,6 +8,7 @@ HTML 交给 AstrBot 的 T2I（html_render）转成图片；文本用于群内快
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -306,7 +307,7 @@ class BracketRenderer:
     @staticmethod
     def profile_card_size(titles: int, runnerups: int) -> tuple[int, int]:
         """名片内容估算尺寸（宽, 高）。"""
-        return PROFILE_CARD_WIDTH + 32, 400 + (titles + runnerups) * 40
+        return PROFILE_CARD_WIDTH + 32, 540 + (titles + runnerups) * 36
 
     @staticmethod
     def _format_date(raw: str | None) -> str:
@@ -371,6 +372,12 @@ class BracketRenderer:
         titles = list(summary.get("titles") or [])
         runnerups = list(summary.get("runnerups") or [])
         win_rate = round(len(titles) / played * 100) if played else 0
+        role_text = f"群内参赛 {played} 场 · 夺冠率 {win_rate}%"
+        short_id = (
+            hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:8].upper()
+            if user_id
+            else "--------"
+        )
 
         def pack(items: list[dict[str, Any]]) -> list[dict[str, str]]:
             return [
@@ -391,6 +398,8 @@ class BracketRenderer:
             titles_count=len(titles),
             runnerups_count=len(runnerups),
             win_rate=win_rate,
+            role_text=role_text,
+            short_id=short_id,
             titles=pack(titles),
             runnerups=pack(runnerups),
             updated_at=updated_at,
