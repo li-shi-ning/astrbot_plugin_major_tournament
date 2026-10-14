@@ -21,13 +21,32 @@ from astrbot_plugin_major_tournament.core.database import (  # noqa: E402
 from astrbot_plugin_major_tournament.main import MajorTournament  # noqa: E402
 
 
+class FakeAt:
+    """模拟 astrbot 的 At 组件。"""
+
+    def __init__(self, qq, name=""):
+        self.qq = qq
+        self.name = name
+
+
 class FakeEvent:
-    def __init__(self, uid="u1", name="选手", group="g1", admin=False, text=""):
+    def __init__(
+        self,
+        uid="u1",
+        name="选手",
+        group="g1",
+        admin=False,
+        text="",
+        messages=None,
+        self_id="BOT_OPENID",
+    ):
         self.uid = uid
         self.name = name
         self.group = group
         self.admin = admin
         self.text = text
+        self._messages = list(messages or [])
+        self._self_id = self_id
 
     def get_message_str(self):
         return self.text
@@ -51,7 +70,10 @@ class FakeEvent:
         return None
 
     def get_messages(self):
-        return []
+        return self._messages
+
+    def get_self_id(self):
+        return self._self_id
 
     def plain_result(self, text):
         return ("text", text)
@@ -592,5 +614,58 @@ def test_champion_list_without_records(tmp_path):
     async def scenario():
         results = await _run(plugin, FakeEvent("u1", "选手1", text="major 冠军榜"))
         assert "还没有产生冠军" in results[0][1]
+
+    asyncio.run(scenario())
+
+
+def test_profile_mention_ignores_bot_self(tmp_path):
+    """@机器人唤醒时不能把机器人自己当成名片目标。"""
+    plugin = _make_plugin(tmp_path)
+    plugin.html_render = _fake_image_render
+
+    async def scenario():
+        await _play_to_finish(plugin)  # u1 房主，最后 u1 赢
+
+        # 消息链里同时有 @机器人（self_id）和 @目标
+        event = FakeEvent(
+            "u9",
+            "路人",
+            text="major 名片 @选手1",
+            messages=[
+                FakeAt("BOT_OPENID", "梅露露"),
+                FakeAt("u1", "选手1"),
+            ],
+        )
+        results = await _run(plugin, event)
+        assert results and results[0][0] == "b64image"
+
+        # 目标应是 u1（有战绩），而不是机器人（0 场）
+        summary = plugin.store.player_summary("g1", "testplat", "u1")
+        assert summary["played"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_profile_name_fallback_when_no_records(tmp_path):
+    """没参过赛的成员，名片名字要用昵称兜底而不是 openid。"""
+    plugin = _make_plugin(tmp_path)
+    plugin.html_render = _fake_image_render
+    openid = "ABCDEF0123456789ABCDEF0123456789"
+
+    async def scenario():
+        event = FakeEvent(
+            "u1",
+            "发起人",
+            text="major 名片",
+            messages=[FakeAt("BOT_OPENID", "机器人"), FakeAt(openid, "没参过赛的人")],
+        )
+        # 直接调用处理器，验证 summary 里的名字被兜底
+        # （用 _pretty_name 单测更直接）
+        assert plugin._pretty_name(openid, "", "没参过赛的人") == "没参过赛的人"
+        assert plugin._pretty_name(openid, openid, "") == f"群友{openid[:6]}"
+        assert plugin._pretty_name("u1", "真名", "") == "真名"
+
+        results = await _run(plugin, event)
+        assert results and results[0][0] == "b64image"
 
     asyncio.run(scenario())

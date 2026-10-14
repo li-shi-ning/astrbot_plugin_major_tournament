@@ -688,6 +688,11 @@ class MajorTournament(Star):
             yield event.plain_result("ℹ️ 还没有产生冠军的比赛。")
             return
 
+        for row in records:
+            row["champion_name"] = self._pretty_name(
+                str(row.get("champion") or ""), row.get("champion_name", "")
+            )
+
         avatar_map = await self._fetch_avatars(
             [str(row["champion"]) for row in records], event
         )
@@ -704,6 +709,7 @@ class MajorTournament(Star):
             yield item
 
     def _resolve_profile_target(self, event: AstrMessageEvent, args: list[str]) -> str:
+        """名片查询目标：优先 @某人（已排除机器人自己），其次参数，最后发送者。"""
         mentions = self._extract_mentions(event)
         if mentions:
             return mentions[0]
@@ -722,9 +728,11 @@ class MajorTournament(Star):
             self._group_id(event), self._platform_id(event), user_id
         )
         sender_id = str(event.get_sender_id() or "")
-        if not summary.get("name") or summary.get("name") == user_id:
-            if user_id == sender_id:
-                summary["name"] = str(event.get_sender_name() or "") or user_id
+        # 昵称兜底：@ 的昵称 > 发送者昵称 > 群友xxxx（避免直接显示 openid）
+        fallback = self._mention_names(event).get(user_id, "")
+        if user_id == sender_id:
+            fallback = fallback or str(event.get_sender_name() or "")
+        summary["name"] = self._pretty_name(user_id, summary.get("name", ""), fallback)
 
         avatar_map = await self._fetch_avatars([user_id], event)
         html = self.renderer.render_profile(
@@ -1254,16 +1262,56 @@ class MajorTournament(Star):
         yield event.plain_result("🗑️ 已重置当前赛事，可以重新「major 报名」了。")
 
     @staticmethod
-    def _extract_mentions(event: AstrMessageEvent) -> list[str]:
-        """从消息链里提取被 @ 的账号。"""
-        targets: list[str] = []
+    def _iter_mentions(event: AstrMessageEvent):
+        """遍历消息链里被 @ 的成员，跳过 @全体 和机器人自己。
+
+        注意：QQ 官方群里唤醒机器人时，@机器人 的 At 组件也在消息链里，
+        必须排除掉，否则「major 名片 @某人」会解析成机器人自己。
+        """
         try:
             from astrbot.core.message.components import At
         except Exception:  # noqa: BLE001
-            return targets
+            return
+        self_id = str(event.get_self_id() or "").strip()
         for component in event.get_messages():
-            if isinstance(component, At):
-                qq = str(getattr(component, "qq", "") or "").strip()
-                if qq and qq != "all" and qq not in targets:
-                    targets.append(qq)
+            if not isinstance(component, At):
+                continue
+            qq = str(getattr(component, "qq", "") or "").strip()
+            if not qq or qq == "all" or (self_id and qq == self_id):
+                continue
+            name = str(getattr(component, "name", "") or "").strip()
+            yield qq, name
+
+    @classmethod
+    def _extract_mentions(cls, event: AstrMessageEvent) -> list[str]:
+        """从消息链里提取被 @ 的账号（排除机器人自己）。"""
+        targets: list[str] = []
+        for qq, _name in cls._iter_mentions(event):
+            if qq not in targets:
+                targets.append(qq)
         return targets
+
+    @classmethod
+    def _mention_names(cls, event: AstrMessageEvent) -> dict[str, str]:
+        """被 @ 成员的昵称映射 {user_id: name}。"""
+        names: dict[str, str] = {}
+        for qq, name in cls._iter_mentions(event):
+            if name:
+                names.setdefault(qq, name)
+        return names
+
+    @staticmethod
+    def _looks_like_openid(text: str) -> bool:
+        return bool(re.fullmatch(r"[0-9A-Fa-f]{20,}", str(text or "").strip()))
+
+    def _pretty_name(self, user_id: str, name: str, fallback: str = "") -> str:
+        """昵称缺失/等于 openid 时，用可读的名称兜底。"""
+        text = str(name or "").strip()
+        uid = str(user_id or "").strip()
+        if text and text != uid:
+            return text
+        if fallback and str(fallback).strip() and str(fallback).strip() != uid:
+            return str(fallback).strip()
+        if self._looks_like_openid(uid):
+            return f"群友{uid[:6]}"
+        return text or uid
