@@ -714,7 +714,7 @@ class MajorTournament(Star):
         if mentions:
             return mentions[0]
         if args and args[0].strip():
-            return args[0].strip()
+            return self._strip_mention_markup(args[0])
         return str(event.get_sender_id() or "")
 
     async def _handle_profile(self, event: AstrMessageEvent, args: list[str]):
@@ -909,7 +909,7 @@ class MajorTournament(Star):
         targets = self._extract_mentions(event)
         name = ""
         if args and not targets:
-            targets = [args[0]]
+            targets = [self._strip_mention_markup(args[0])]
             name = args[1] if len(args) > 1 else ""
         elif args and targets:
             name = args[-1]
@@ -1262,43 +1262,61 @@ class MajorTournament(Star):
         yield event.plain_result("🗑️ 已重置当前赛事，可以重新「major 报名」了。")
 
     @staticmethod
-    def _iter_mentions(event: AstrMessageEvent):
-        """遍历消息链里被 @ 的成员，跳过 @全体 和机器人自己。
+    def _collect_mentions(event: AstrMessageEvent) -> list[tuple[str, str]]:
+        """收集消息里被 @ 的成员 [(user_id, name)]，跳过 @全体 和机器人自己。
 
-        注意：QQ 官方群里唤醒机器人时，@机器人 的 At 组件也在消息链里，
-        必须排除掉，否则「major 名片 @某人」会解析成机器人自己。
+        两种来源都要处理：
+        - AstrBot 解析出的 ``At`` 组件；
+        - 部分平台（QQ 官方）会把 @ 保留成纯文本 ``<@openid>``。
         """
         try:
-            from astrbot.core.message.components import At
+            from astrbot.core.message.components import At, Plain
         except Exception:  # noqa: BLE001
-            return
+            return []
+
         self_id = str(event.get_self_id() or "").strip()
+        found: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        def keep(qq: str, name: str) -> None:
+            uid = str(qq or "").strip()
+            if not uid or uid == "all" or (self_id and uid == self_id):
+                return
+            if uid in seen:
+                return
+            seen.add(uid)
+            found.append((uid, str(name or "").strip()))
+
         for component in event.get_messages():
-            if not isinstance(component, At):
-                continue
-            qq = str(getattr(component, "qq", "") or "").strip()
-            if not qq or qq == "all" or (self_id and qq == self_id):
-                continue
-            name = str(getattr(component, "name", "") or "").strip()
-            yield qq, name
+            if isinstance(component, At):
+                keep(getattr(component, "qq", ""), getattr(component, "name", ""))
+            elif isinstance(component, Plain):
+                for match in re.finditer(
+                    r"<@!?([0-9A-Za-z_\-]{6,})>", getattr(component, "text", "") or ""
+                ):
+                    keep(match.group(1), "")
+        return found
 
     @classmethod
     def _extract_mentions(cls, event: AstrMessageEvent) -> list[str]:
-        """从消息链里提取被 @ 的账号（排除机器人自己）。"""
-        targets: list[str] = []
-        for qq, _name in cls._iter_mentions(event):
-            if qq not in targets:
-                targets.append(qq)
-        return targets
+        """提取被 @ 的账号（排除机器人自己）。"""
+        return [uid for uid, _name in cls._collect_mentions(event)]
 
     @classmethod
     def _mention_names(cls, event: AstrMessageEvent) -> dict[str, str]:
         """被 @ 成员的昵称映射 {user_id: name}。"""
         names: dict[str, str] = {}
-        for qq, name in cls._iter_mentions(event):
+        for uid, name in cls._collect_mentions(event):
             if name:
-                names.setdefault(qq, name)
+                names.setdefault(uid, name)
         return names
+
+    @staticmethod
+    def _strip_mention_markup(text: str) -> str:
+        """把 ``<@openid>`` / ``<@!openid>`` 还原成裸 user_id。"""
+        raw = str(text or "").strip()
+        match = re.fullmatch(r"<@!?([0-9A-Za-z_\-]{6,})>", raw)
+        return match.group(1) if match else raw
 
     @staticmethod
     def _looks_like_openid(text: str) -> bool:

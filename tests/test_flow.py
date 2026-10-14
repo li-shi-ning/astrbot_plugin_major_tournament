@@ -15,10 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 pytest.importorskip("astrbot", reason="需要 AstrBot 运行环境")
 
 from astrbot.core.message.components import At as RealAt  # noqa: E402
-from astrbot_plugin_major_tournament.core.bracket import pending_matches  # noqa: E402
+from astrbot.core.message.components import Plain as RealPlain  # noqa: E402
+from astrbot_plugin_major_tournament.core.bracket import (  # noqa: E402
+    pending_matches,
+    set_winner,
+    start_tournament,
+)
 from astrbot_plugin_major_tournament.core.database import (  # noqa: E402
     TournamentDatabase,
 )
+from astrbot_plugin_major_tournament.core.models import Tournament  # noqa: E402
 from astrbot_plugin_major_tournament.main import MajorTournament  # noqa: E402
 
 
@@ -670,5 +676,54 @@ def test_profile_name_fallback_when_no_records(tmp_path):
 
         results = await _run(plugin, event)
         assert results and results[0][0] == "b64image"
+
+    asyncio.run(scenario())
+
+
+def test_profile_target_from_plain_text_mention(tmp_path):
+    """QQ 官方会把 @目标 留成纯文本 <@openid>，也要能正确解析。"""
+    plugin = _make_plugin(tmp_path)
+    captured: dict[str, str] = {}
+
+    async def fake_render(tmpl, data, return_url=True, options=None):
+        captured["html"] = tmpl
+        return b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    plugin.html_render = fake_render
+    target = "5009C8D2CFBB9E17943E7188C7142C15"
+
+    async def scenario():
+        # 造一场含该 openid 选手的已结束赛事
+        t = Tournament(group_id="g1", platform_id="testplat", name="纯文本@杯", size=4)
+        t.add_player(target, "默然")
+        for i in range(3):
+            t.add_player(f"x{i}", f"路人{i}")
+        plugin.store.save(t)
+        loaded = plugin.store.load("g1", "testplat")
+        start_tournament(loaded, 4, seed_mode="register")
+        guard = 0
+        while loaded.status != "finished" and guard < 10:
+            guard += 1
+            matches = pending_matches(loaded)
+            if not matches:
+                break
+            set_winner(loaded, matches[0].match_id, "1")
+        plugin.store.save(loaded)
+        plugin.store.delete("g1", "testplat")
+
+        # 消息链里只有 @机器人 是 At，@目标 是纯文本
+        event = FakeEvent(
+            "uX",
+            "某人",
+            text=f"major 名片 <@{target}>",
+            messages=[
+                RealAt(qq="BOT_OPENID", name="梅露露"),
+                RealPlain(text=f" major 名片 <@{target}>"),
+            ],
+        )
+        results = await _run(plugin, event)
+        assert results and results[0][0] == "b64image"
+        assert "默然" in captured["html"]
+        assert target not in captured["html"]  # 不应直接把 openid 当名字显示
 
     asyncio.run(scenario())
