@@ -12,15 +12,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
+from PIL import Image
 
 from .core.avatars import AvatarFetcher, build_avatar_url
 from .core.bracket import (
@@ -1184,47 +1187,96 @@ class MajorTournament(Star):
 
     @staticmethod
     async def _yield_bracket_image(event: AstrMessageEvent, result):
-        """把渲染结果统一转成 base64 图片再发送。
+        """Send images with one original retry and one compressed fallback.
 
-        兼容不同平台与 T2I 返回类型：
-        - bytes：直接 base64；
-        - http(s) URL：直接发链接；
-        - 本地路径：读取文件后 base64（避免 OneBot / 官方机器人访问不到内部路径）。
+        Args:
+            event: Event whose adapter performs the actual upload and send.
+            result: Rendered image bytes, local path, or HTTP URL.
+
+        Yields:
+            A text error if the image is invalid or all send attempts fail.
         """
+        blob = None
         if isinstance(result, bytes):
-            if not _looks_like_image(result):
-                yield event.plain_result(
-                    "❌ 对阵图渲染结果不是有效图片，请检查 T2I 服务。"
-                )
-                return
-            yield event.make_result().base64_image(
-                base64.b64encode(result).decode("utf-8")
-            )
+            blob = result
+        elif isinstance(result, str) and result:
+            if not result.startswith(("http://", "https://")):
+                try:
+                    blob = await asyncio.to_thread(Path(result).read_bytes)
+                except OSError:
+                    # Let the adapter resolve paths it can access itself.
+                    pass
+        else:
+            yield event.plain_result("❌ 对阵图渲染失败，请稍后重试。")
             return
 
-        if isinstance(result, str) and result.startswith(("http://", "https://")):
-            yield event.image_result(result)
+        if blob is not None and not _looks_like_image(blob):
+            yield event.plain_result("❌ 对阵图渲染结果不是有效图片，请检查 T2I 服务。")
             return
 
-        if isinstance(result, str) and result:
+        for attempt in range(2):
             try:
-                with open(result, "rb") as handle:
-                    blob = handle.read()
-            except OSError:
-                # 读取失败时退回让平台自行处理该路径
-                yield event.image_result(result)
-                return
-            if not _looks_like_image(blob):
-                yield event.plain_result(
-                    "❌ 对阵图渲染结果不是有效图片，请检查 T2I 服务。"
+                message = (
+                    event.make_result().base64_image(base64.b64encode(blob).decode())
+                    if blob is not None
+                    else event.image_result(result)
                 )
+                # Yielding would defer upload until after this exception handler.
+                await event.send(message)
                 return
-            yield event.make_result().base64_image(
-                base64.b64encode(blob).decode("utf-8")
-            )
-            return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[Major] Original image send attempt {attempt + 1}/2 failed: {exc}"
+                )
 
-        yield event.plain_result("❌ 对阵图渲染失败，请稍后重试。")
+        try:
+            if blob is None:
+                if result.startswith(("http://", "https://")):
+                    from astrbot.core.utils.io import download_image_by_url
+
+                    downloaded = Path(await download_image_by_url(result))
+                    try:
+                        blob = await asyncio.to_thread(downloaded.read_bytes)
+                    finally:
+                        await asyncio.to_thread(downloaded.unlink, missing_ok=True)
+                else:
+                    blob = await asyncio.to_thread(Path(result).read_bytes)
+
+            def compress_image() -> bytes:
+                """Encode a smaller JPEG without modifying the original file.
+
+                Returns:
+                    JPEG bytes, reducing dimensions when quality alone is insufficient.
+                """
+                with Image.open(BytesIO(blob)) as source:
+                    source.load()
+                    image = Image.new("RGB", source.size, "white")
+                    rgba = source.convert("RGBA")
+                    image.paste(rgba, mask=rgba.getchannel("A"))
+                    image.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+                    while True:
+                        for quality in (80, 60, 40):
+                            output = BytesIO()
+                            image.save(
+                                output, format="JPEG", quality=quality, optimize=True
+                            )
+                            compressed = output.getvalue()
+                            if len(compressed) < len(blob) or image.size == (1, 1):
+                                return compressed
+                        image = image.resize(
+                            (max(1, image.width // 2), max(1, image.height // 2)),
+                            Image.Resampling.LANCZOS,
+                        )
+
+            compressed = await asyncio.to_thread(compress_image)
+            await event.send(
+                event.make_result().base64_image(base64.b64encode(compressed).decode())
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[Major] Compressed image fallback failed: {exc}")
+            yield event.plain_result(
+                "❌ 图片上传失败，原图已重试并尝试压缩，请稍后重试。"
+            )
 
     async def _handle_winner(self, event: AstrMessageEvent, args: list[str]):
         if len(args) < 2:
