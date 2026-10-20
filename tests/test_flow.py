@@ -4,10 +4,13 @@
 """
 
 import asyncio
+import base64
 import sys
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -46,6 +49,7 @@ class FakeEvent:
         self.text = text
         self._messages = list(messages or [])
         self._self_id = self_id
+        self.sent = []
 
     def get_message_str(self):
         return self.text
@@ -86,9 +90,13 @@ class FakeEvent:
     def base64_image(self, b64):
         return ("b64image", b64)
 
+    async def send(self, message):
+        self.sent.append(message)
+
 
 async def _run(plugin, event):
-    return [item async for item in plugin.major(event)]
+    results = [item async for item in plugin.major(event)]
+    return event.sent + results
 
 
 def _make_plugin(tmp_path):
@@ -256,7 +264,9 @@ def test_yield_image_handles_bytes_url_and_file(tmp_path):
     event = FakeEvent()
 
     async def passthrough(result):
-        return [item async for item in plugin._yield_bracket_image(event, result)]
+        event.sent.clear()
+        results = [item async for item in plugin._yield_bracket_image(event, result)]
+        return event.sent + results
 
     png = tmp_path / "a.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
@@ -765,3 +775,138 @@ def test_render_html_image_raises_when_all_invalid(tmp_path):
         assert "不是有效图片" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("全部失败时应抛错，交给上层回退文字")
+
+
+@pytest.mark.parametrize("failures", [0, 1, 2, 3])
+@pytest.mark.parametrize("source_type", ["bytes", "path", "url"])
+def test_image_send_retries_then_compresses(
+    tmp_path, monkeypatch, failures, source_type
+):
+    output = BytesIO()
+    Image.effect_noise((512, 512), 100).convert("RGB").save(output, "PNG")
+    original = output.getvalue()
+    image_path = tmp_path / "original.png"
+    image_path.write_bytes(original)
+    downloaded = tmp_path / "download.png"
+    downloads = []
+
+    async def download(url):
+        downloads.append(url)
+        downloaded.write_bytes(original)
+        return str(downloaded)
+
+    monkeypatch.setattr("astrbot.core.utils.io.download_image_by_url", download)
+    attempts = []
+
+    class UploadEvent(FakeEvent):
+        async def send(self, message):
+            attempts.append(message)
+            if len(attempts) <= failures:
+                raise RuntimeError("Failed to upload image, response is not dict: None")
+            await super().send(message)
+
+    event = UploadEvent()
+    source = {
+        "bytes": original,
+        "path": str(image_path),
+        "url": "https://example.com/original.png",
+    }[source_type]
+
+    async def scenario():
+        return [
+            item async for item in MajorTournament._yield_bracket_image(event, source)
+        ]
+
+    results = asyncio.run(scenario())
+    assert len(attempts) == min(failures + 1, 3)
+    if failures:
+        assert attempts[0] == attempts[1]
+    if failures >= 2:
+        compressed = base64.b64decode(attempts[2][1])
+        assert compressed.startswith(b"\xff\xd8\xff")
+        assert len(compressed) < len(original)
+        with Image.open(BytesIO(compressed)) as image:
+            assert image.size == (512, 512)
+    assert len(downloads) == int(source_type == "url" and failures >= 2)
+    assert not downloaded.exists()
+    assert image_path.read_bytes() == original
+    if failures == 3:
+        assert not event.sent
+        assert len(results) == 1 and "图片上传失败" in results[0][1]
+    else:
+        assert len(event.sent) == 1
+        assert results == []
+
+
+def test_image_send_cancellation_is_not_retried():
+    attempts = []
+
+    class CancelEvent(FakeEvent):
+        async def send(self, message):
+            attempts.append(message)
+            raise asyncio.CancelledError
+
+    async def scenario():
+        return [
+            item
+            async for item in MajorTournament._yield_bracket_image(
+                CancelEvent(), b"\x89PNG\r\n\x1a\n" + b"0" * 32
+            )
+        ]
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scenario())
+    assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("size", [(512, 512), (1, 1), (2400, 1200)])
+def test_compressed_fallback_handles_flat_transparent_png(size):
+    output = BytesIO()
+    Image.new("RGBA", size, (0, 0, 0, 0)).save(output, "PNG", optimize=True)
+    original = output.getvalue()
+    attempts = []
+
+    class UploadEvent(FakeEvent):
+        async def send(self, message):
+            attempts.append(message)
+            if len(attempts) < 3:
+                raise RuntimeError("upload failed")
+
+    async def scenario():
+        return [
+            item
+            async for item in MajorTournament._yield_bracket_image(
+                UploadEvent(), original
+            )
+        ]
+
+    assert asyncio.run(scenario()) == []
+    assert len(attempts) == 3
+    compressed = base64.b64decode(attempts[2][1])
+    with Image.open(BytesIO(compressed)) as image:
+        assert image.mode == "RGB"
+        assert max(image.size) <= 1920
+        assert image.getpixel((0, 0)) == (255, 255, 255)
+    if size != (1, 1):
+        assert len(compressed) < len(original)
+
+
+def test_image_send_reports_compression_failure():
+    attempts = []
+
+    class UploadEvent(FakeEvent):
+        async def send(self, message):
+            attempts.append(message)
+            raise RuntimeError("upload failed")
+
+    async def scenario():
+        return [
+            item
+            async for item in MajorTournament._yield_bracket_image(
+                UploadEvent(), b"\x89PNG\r\n\x1a\n" + b"0" * 32
+            )
+        ]
+
+    results = asyncio.run(scenario())
+    assert len(attempts) == 2
+    assert len(results) == 1 and "图片上传失败" in results[0][1]

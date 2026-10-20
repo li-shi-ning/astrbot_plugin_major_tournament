@@ -184,6 +184,7 @@ def test_render_profile_uses_neon_card_fields():
         summary = db.player_summary("g", "p", loaded.champion)
         renderer = BracketRenderer(Path(__file__).resolve().parents[1] / "templates")
         html = renderer.render_profile(summary, {}, updated_at="2026-11-05 12:00")
+        db.close()
 
     # 科技感元素
     assert "orbit" in html
